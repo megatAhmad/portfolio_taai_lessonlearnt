@@ -582,11 +582,24 @@ pip install -r requirements.txt
     st.markdown("### 4. Configure Environment")
     st.code("""
 cp .env.example .env
-# Edit .env with your Azure OpenAI credentials
+# Edit .env with your LLM provider credentials (Azure OpenAI or OpenRouter)
     """, language="bash")
 
-    with st.expander("View .env Configuration"):
+    st.markdown("""
+    The system supports two LLM providers:
+    - **Azure OpenAI** - Microsoft's hosted OpenAI models
+    - **OpenRouter** - Multi-provider API gateway (access to OpenAI, Anthropic, and more)
+
+    Choose one provider and configure the relevant environment variables.
+    """)
+
+    tab1, tab2 = st.tabs(["Azure OpenAI Configuration", "OpenRouter Configuration"])
+
+    with tab1:
         st.code("""
+# LLM Provider
+LLM_PROVIDER=azure
+
 # Azure OpenAI Configuration
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_API_KEY=your-api-key-here
@@ -594,8 +607,22 @@ AZURE_OPENAI_API_VERSION=2024-05-01-preview
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-small
 AZURE_OPENAI_CHAT_DEPLOYMENT=gpt-4o-mini
 AZURE_OPENAI_ENRICHMENT_DEPLOYMENT=gpt-4o-mini
-DEBUG=false
         """)
+        st.info("Get your Azure OpenAI credentials from the Azure Portal.")
+
+    with tab2:
+        st.code("""
+# LLM Provider
+LLM_PROVIDER=openrouter
+
+# OpenRouter Configuration
+OPENROUTER_API_KEY=your-openrouter-api-key-here
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_EMBEDDING_MODEL=openai/text-embedding-3-small
+OPENROUTER_CHAT_MODEL=openai/gpt-4o-mini
+OPENROUTER_ENRICHMENT_MODEL=openai/gpt-4o-mini
+        """)
+        st.info("Get your OpenRouter API key from https://openrouter.ai/keys")
 
     st.markdown("### 5. Generate Sample Data (Optional)")
     st.code("""
@@ -653,8 +680,22 @@ from config.settings import load_settings
 
 settings = load_settings()
 
-# Access settings
-settings.azure_openai.endpoint
+# Check LLM provider
+settings.llm_provider        # "azure" or "openrouter"
+settings.is_azure            # True if using Azure OpenAI
+settings.is_openrouter       # True if using OpenRouter
+
+# Get model names (works for both providers)
+settings.get_chat_model()     # Returns chat model name
+settings.get_embedding_model() # Returns embedding model name
+
+# Access provider-specific settings
+if settings.is_azure:
+    settings.azure_openai.endpoint
+elif settings.is_openrouter:
+    settings.openrouter.api_key
+
+# Other settings
 settings.embeddings.dimensions
 settings.retrieval.rrf_k
 settings.enrichment.high_confidence_threshold

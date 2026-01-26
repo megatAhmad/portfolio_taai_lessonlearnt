@@ -1,4 +1,4 @@
-"""Azure OpenAI embeddings with caching and batching."""
+"""LLM embeddings with caching and batching (Azure OpenAI and OpenRouter)."""
 
 import hashlib
 import json
@@ -6,9 +6,10 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 import logging
 
-from openai import AzureOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 import tiktoken
+
+from config.llm_client import create_embedding_client, get_model_name
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ CACHE_DIR = Path("chroma_db/embedding_cache")
 
 
 class EmbeddingManager:
-    """Manages Azure OpenAI embeddings with caching."""
+    """Manages LLM embeddings with caching (supports Azure OpenAI and OpenRouter)."""
 
     def __init__(self, settings):
         """
@@ -27,12 +28,8 @@ class EmbeddingManager:
             settings: Application settings
         """
         self.settings = settings
-        self.client = AzureOpenAI(
-            azure_endpoint=settings.azure_openai.endpoint,
-            api_key=settings.azure_openai.api_key,
-            api_version=settings.azure_openai.api_version,
-        )
-        self.deployment = settings.azure_openai.embedding_deployment
+        self.client = create_embedding_client(settings)
+        self.model = get_model_name(settings, "embedding")
         self.dimensions = settings.embeddings.dimensions
         self.batch_size = settings.embeddings.batch_size
         self.cache_enabled = settings.embeddings.cache_embeddings
@@ -45,6 +42,8 @@ class EmbeddingManager:
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
         self._cache: Dict[str, List[float]] = {}
+
+        logger.info(f"EmbeddingManager initialized with provider: {settings.llm_provider}, model: {self.model}")
 
     def count_tokens(self, text: str) -> int:
         """
@@ -139,7 +138,7 @@ class EmbeddingManager:
     @retry(stop=stop_after_attempt(6), wait=wait_exponential(multiplier=1, min=1, max=60))
     def _call_embedding_api(self, texts: List[str]) -> List[List[float]]:
         """
-        Call Azure OpenAI embedding API.
+        Call embedding API (Azure OpenAI or OpenRouter).
 
         Args:
             texts: List of texts to embed
@@ -148,7 +147,7 @@ class EmbeddingManager:
             List of embedding vectors
         """
         response = self.client.embeddings.create(
-            model=self.deployment,
+            model=self.model,
             input=texts,
         )
 

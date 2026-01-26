@@ -36,16 +36,23 @@ This proof-of-concept application helps maintenance teams:
 | Frontend | Streamlit |
 | RAG Framework | LangChain |
 | Vector Database | ChromaDB |
-| Embeddings | Azure OpenAI text-embedding-3-small |
-| LLM | Azure OpenAI GPT-4o-mini |
+| Embeddings | Azure OpenAI or OpenRouter |
+| LLM | GPT-4o-mini (via Azure or OpenRouter) |
 | Sparse Search | rank_bm25 |
 | Reranker | sentence-transformers cross-encoder |
+
+### Supported LLM Providers
+
+| Provider | Description |
+|----------|-------------|
+| **Azure OpenAI** | Microsoft's hosted OpenAI models |
+| **OpenRouter** | Multi-provider API gateway (OpenAI, Anthropic, etc.) |
 
 ## Installation
 
 ### Prerequisites
 - Python 3.10 or higher
-- Azure OpenAI resource with deployed models
+- API key for either Azure OpenAI or OpenRouter
 
 ### Setup
 
@@ -69,7 +76,27 @@ pip install -r requirements.txt
 4. Configure environment variables:
 ```bash
 cp .env.example .env
-# Edit .env with your Azure OpenAI credentials
+# Edit .env with your LLM provider credentials
+```
+
+Choose one of the following configurations:
+
+**Option A: Azure OpenAI**
+```env
+LLM_PROVIDER=azure
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_API_KEY=your-api-key
+AZURE_OPENAI_API_VERSION=2024-05-01-preview
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-small
+AZURE_OPENAI_CHAT_DEPLOYMENT=gpt-4o-mini
+```
+
+**Option B: OpenRouter**
+```env
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=your-openrouter-api-key
+OPENROUTER_EMBEDDING_MODEL=openai/text-embedding-3-small
+OPENROUTER_CHAT_MODEL=openai/gpt-4o-mini
 ```
 
 5. Generate sample data (optional):
@@ -159,7 +186,8 @@ portfolio_taai_lessonlearnt/
 ├── CLAUDE.md                 # AI assistant guide
 ├── config/
 │   ├── settings.py           # Configuration management
-│   └── prompts.py            # LLM prompt templates
+│   ├── prompts.py            # LLM prompt templates
+│   └── llm_client.py         # LLM client factory (Azure/OpenRouter)
 ├── src/
 │   ├── data_processing/
 │   │   ├── excel_loader.py   # Excel file handling
@@ -204,10 +232,17 @@ Tips to minimize costs:
 
 ## Troubleshooting
 
-### Azure OpenAI Connection Errors
-- Verify `.env` file configuration
+### LLM Connection Errors
+
+**Azure OpenAI:**
+- Verify `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY` in `.env`
 - Check API version compatibility
 - Ensure models are deployed in Azure OpenAI Studio
+
+**OpenRouter:**
+- Verify `OPENROUTER_API_KEY` in `.env`
+- Check model names at https://openrouter.ai/models
+- Ensure your account has sufficient credits
 
 ### ChromaDB Issues
 - Delete `chroma_db/` directory to reset
@@ -227,4 +262,4 @@ Megat Ahmad - Oil & Gas Maintenance AI Systems
 
 ---
 
-*Built with Azure OpenAI, LangChain, and Streamlit*
+*Built with Azure OpenAI/OpenRouter, LangChain, and Streamlit*

@@ -1,4 +1,4 @@
-"""GPT-4o-mini powered relevance analysis between lessons and jobs."""
+"""LLM-powered relevance analysis between lessons and jobs (Azure OpenAI and OpenRouter)."""
 
 import json
 from typing import List, Dict, Any, Optional
@@ -6,8 +6,10 @@ from dataclasses import dataclass, asdict
 from pydantic import BaseModel, Field
 import logging
 
-from openai import AzureOpenAI
+from openai import OpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
+
+from config.llm_client import create_chat_client, get_model_name
 
 logger = logging.getLogger(__name__)
 
@@ -54,14 +56,12 @@ class RelevanceAnalyzer:
             settings: Application settings
         """
         self.settings = settings
-        self.client = AzureOpenAI(
-            azure_endpoint=settings.azure_openai.endpoint,
-            api_key=settings.azure_openai.api_key,
-            api_version=settings.azure_openai.api_version,
-        )
-        self.deployment = settings.azure_openai.chat_deployment
+        self.client = create_chat_client(settings)
+        self.model = get_model_name(settings, "chat")
         self.temperature = settings.generation.temperature
         self.max_tokens = settings.generation.max_tokens
+
+        logger.info(f"RelevanceAnalyzer initialized with provider: {settings.llm_provider}, model: {self.model}")
 
     @retry(stop=stop_after_attempt(6), wait=wait_exponential(multiplier=1, min=1, max=60))
     def _call_analysis_api(
@@ -70,7 +70,7 @@ class RelevanceAnalyzer:
         user_prompt: str,
     ) -> Dict[str, Any]:
         """
-        Call Azure OpenAI API for relevance analysis.
+        Call LLM API for relevance analysis (Azure OpenAI or OpenRouter).
 
         Args:
             system_prompt: System prompt
@@ -80,7 +80,7 @@ class RelevanceAnalyzer:
             Parsed JSON response
         """
         response = self.client.chat.completions.create(
-            model=self.deployment,
+            model=self.model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},

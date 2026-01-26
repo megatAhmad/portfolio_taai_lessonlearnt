@@ -94,10 +94,15 @@ def render_sidebar(settings: Settings):
         # Configuration info
         st.subheader("Configuration")
 
-        with st.expander("Azure OpenAI"):
-            st.caption(f"Endpoint: {settings.azure_openai.endpoint[:30]}...")
-            st.caption(f"Embedding: {settings.azure_openai.embedding_deployment}")
-            st.caption(f"Chat: {settings.azure_openai.chat_deployment}")
+        with st.expander("LLM Provider"):
+            st.caption(f"Provider: **{settings.llm_provider.upper()}**")
+            if settings.is_azure:
+                st.caption(f"Endpoint: {settings.azure_openai.endpoint[:30]}...")
+                st.caption(f"Embedding: {settings.azure_openai.embedding_deployment}")
+                st.caption(f"Chat: {settings.azure_openai.chat_deployment}")
+            else:
+                st.caption(f"Embedding: {settings.openrouter.embedding_model}")
+                st.caption(f"Chat: {settings.openrouter.chat_model}")
 
         with st.expander("Retrieval Settings"):
             st.caption(f"Chunk size: {settings.chunking.chunk_size}")

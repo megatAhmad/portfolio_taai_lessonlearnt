@@ -2,11 +2,14 @@
 
 import os
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Literal
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
+# LLM Provider type
+LLMProvider = Literal["azure", "openrouter"]
 
 
 @dataclass
@@ -19,6 +22,23 @@ class AzureOpenAISettings:
     embedding_deployment: str = field(default_factory=lambda: os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-3-small"))
     chat_deployment: str = field(default_factory=lambda: os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "gpt-4o-mini"))
     enrichment_deployment: str = field(default_factory=lambda: os.getenv("AZURE_OPENAI_ENRICHMENT_DEPLOYMENT", "gpt-4o-mini"))
+
+
+@dataclass
+class OpenRouterSettings:
+    """OpenRouter configuration settings."""
+
+    api_key: str = field(default_factory=lambda: os.getenv("OPENROUTER_API_KEY", ""))
+    base_url: str = field(default_factory=lambda: os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"))
+
+    # Model names for OpenRouter
+    embedding_model: str = field(default_factory=lambda: os.getenv("OPENROUTER_EMBEDDING_MODEL", "openai/text-embedding-3-small"))
+    chat_model: str = field(default_factory=lambda: os.getenv("OPENROUTER_CHAT_MODEL", "openai/gpt-4o-mini"))
+    enrichment_model: str = field(default_factory=lambda: os.getenv("OPENROUTER_ENRICHMENT_MODEL", "openai/gpt-4o-mini"))
+
+    # Optional headers for OpenRouter
+    site_url: str = field(default_factory=lambda: os.getenv("OPENROUTER_SITE_URL", ""))
+    app_name: str = field(default_factory=lambda: os.getenv("OPENROUTER_APP_NAME", "Maintenance RAG System"))
 
 
 @dataclass
@@ -137,7 +157,11 @@ class AppSettings:
 class Settings:
     """Main settings container."""
 
+    # LLM Provider: "azure" or "openrouter"
+    llm_provider: LLMProvider = field(default_factory=lambda: os.getenv("LLM_PROVIDER", "azure").lower())
+
     azure_openai: AzureOpenAISettings = field(default_factory=AzureOpenAISettings)
+    openrouter: OpenRouterSettings = field(default_factory=OpenRouterSettings)
     embeddings: EmbeddingSettings = field(default_factory=EmbeddingSettings)
     chunking: ChunkingSettings = field(default_factory=ChunkingSettings)
     retrieval: RetrievalSettings = field(default_factory=RetrievalSettings)
@@ -150,21 +174,65 @@ class Settings:
         """Shortcut for app.debug."""
         return self.app.debug
 
+    @property
+    def is_azure(self) -> bool:
+        """Check if using Azure OpenAI provider."""
+        return self.llm_provider == "azure"
+
+    @property
+    def is_openrouter(self) -> bool:
+        """Check if using OpenRouter provider."""
+        return self.llm_provider == "openrouter"
+
+    def get_chat_model(self) -> str:
+        """Get the chat model name based on provider."""
+        if self.is_azure:
+            return self.azure_openai.chat_deployment
+        return self.openrouter.chat_model
+
+    def get_embedding_model(self) -> str:
+        """Get the embedding model name based on provider."""
+        if self.is_azure:
+            return self.azure_openai.embedding_deployment
+        return self.openrouter.embedding_model
+
+    def get_enrichment_model(self) -> str:
+        """Get the enrichment model name based on provider."""
+        if self.is_azure:
+            return self.azure_openai.enrichment_deployment
+        return self.openrouter.enrichment_model
+
     def validate(self) -> bool:
         """Validate that required settings are configured."""
-        if not self.azure_openai.endpoint:
-            return False
-        if not self.azure_openai.api_key:
-            return False
+        if self.is_azure:
+            if not self.azure_openai.endpoint:
+                return False
+            if not self.azure_openai.api_key:
+                return False
+        elif self.is_openrouter:
+            if not self.openrouter.api_key:
+                return False
+        else:
+            return False  # Invalid provider
         return True
 
     def get_validation_errors(self) -> list[str]:
         """Get list of validation errors."""
         errors = []
-        if not self.azure_openai.endpoint:
-            errors.append("AZURE_OPENAI_ENDPOINT is not configured")
-        if not self.azure_openai.api_key:
-            errors.append("AZURE_OPENAI_API_KEY is not configured")
+
+        if self.llm_provider not in ("azure", "openrouter"):
+            errors.append(f"Invalid LLM_PROVIDER: {self.llm_provider}. Must be 'azure' or 'openrouter'")
+            return errors
+
+        if self.is_azure:
+            if not self.azure_openai.endpoint:
+                errors.append("AZURE_OPENAI_ENDPOINT is not configured")
+            if not self.azure_openai.api_key:
+                errors.append("AZURE_OPENAI_API_KEY is not configured")
+        elif self.is_openrouter:
+            if not self.openrouter.api_key:
+                errors.append("OPENROUTER_API_KEY is not configured")
+
         return errors
 
 

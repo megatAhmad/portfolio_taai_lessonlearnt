@@ -1,4 +1,4 @@
-"""LLM-powered metadata enrichment for lessons learned."""
+"""LLM-powered metadata enrichment for lessons learned (Azure OpenAI and OpenRouter)."""
 
 import json
 from datetime import datetime
@@ -7,8 +7,10 @@ from dataclasses import dataclass, field, asdict
 from pydantic import BaseModel, Field
 import logging
 
-from openai import AzureOpenAI
+from openai import OpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
+
+from config.llm_client import create_chat_client, get_model_name
 
 logger = logging.getLogger(__name__)
 
@@ -59,32 +61,28 @@ class EnrichmentProgress:
         return (self.processed / self.total * 100) if self.total > 0 else 0
 
 
-def create_openai_client(settings) -> AzureOpenAI:
-    """Create Azure OpenAI client from settings."""
-    return AzureOpenAI(
-        azure_endpoint=settings.azure_openai.endpoint,
-        api_key=settings.azure_openai.api_key,
-        api_version=settings.azure_openai.api_version,
-    )
+def create_llm_client(settings) -> OpenAI:
+    """Create LLM client from settings (Azure OpenAI or OpenRouter)."""
+    return create_chat_client(settings)
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10))
 def call_enrichment_api(
-    client: AzureOpenAI,
+    client: OpenAI,
     system_prompt: str,
     user_prompt: str,
-    deployment: str,
+    model: str,
     temperature: float = 0.1,
     max_tokens: int = 300,
 ) -> Dict[str, Any]:
     """
-    Call Azure OpenAI API for enrichment.
+    Call LLM API for enrichment (Azure OpenAI or OpenRouter).
 
     Args:
-        client: Azure OpenAI client
+        client: OpenAI-compatible client
         system_prompt: System prompt
         user_prompt: User prompt with lesson data
-        deployment: Deployment name
+        model: Model name/deployment
         temperature: Temperature for generation
         max_tokens: Maximum tokens in response
 
@@ -92,7 +90,7 @@ def call_enrichment_api(
         Parsed JSON response
     """
     response = client.chat.completions.create(
-        model=deployment,
+        model=model,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -108,9 +106,9 @@ def call_enrichment_api(
 
 def enrich_single_lesson(
     lesson: Dict[str, Any],
-    client: AzureOpenAI,
+    client: OpenAI,
     system_prompt: str,
-    deployment: str,
+    model: str,
     settings: Any,
 ) -> EnrichmentResult:
     """
@@ -118,9 +116,9 @@ def enrich_single_lesson(
 
     Args:
         lesson: Lesson dictionary
-        client: Azure OpenAI client
+        client: OpenAI-compatible client
         system_prompt: System prompt for enrichment
-        deployment: Deployment name
+        model: Model name/deployment
         settings: Application settings
 
     Returns:
@@ -139,7 +137,7 @@ def enrich_single_lesson(
             client=client,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            deployment=deployment,
+            model=model,
             temperature=settings.enrichment.temperature,
             max_tokens=settings.enrichment.max_tokens,
         )
@@ -243,8 +241,11 @@ def enrich_lessons(
     results = []
     progress = EnrichmentProgress(total=len(lessons))
 
-    # Create OpenAI client
-    client = create_openai_client(settings)
+    # Create LLM client (Azure OpenAI or OpenRouter)
+    client = create_llm_client(settings)
+    model = get_model_name(settings, "enrichment")
+
+    logger.info(f"Starting enrichment with provider: {settings.llm_provider}, model: {model}")
 
     for i, lesson in enumerate(lessons):
         # Enrich single lesson
@@ -252,7 +253,7 @@ def enrich_lessons(
             lesson=lesson,
             client=client,
             system_prompt=ENRICHMENT_SYSTEM_PROMPT,
-            deployment=settings.azure_openai.enrichment_deployment,
+            model=model,
             settings=settings,
         )
 
