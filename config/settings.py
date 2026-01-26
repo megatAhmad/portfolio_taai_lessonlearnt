@@ -28,6 +28,7 @@ class EmbeddingSettings:
     model: str = "text-embedding-3-small"
     dimensions: int = 1536
     batch_size: int = 100
+    cache_embeddings: bool = True
 
 
 @dataclass
@@ -61,11 +62,13 @@ class RetrievalSettings:
     # Score boosting
     equipment_specific_boost: float = 1.5
     equipment_type_boost: float = 1.2
+    generic_boost: float = 1.3
     universal_boost: float = 1.3
     safety_critical_boost: float = 1.4
     procedure_overlap_boost: float = 0.1  # Per overlapping procedure
 
     # Final results
+    top_k: int = 5
     final_top_k: int = 5
     min_relevance_score: float = 0.5
 
@@ -135,12 +138,17 @@ class Settings:
     """Main settings container."""
 
     azure_openai: AzureOpenAISettings = field(default_factory=AzureOpenAISettings)
-    embedding: EmbeddingSettings = field(default_factory=EmbeddingSettings)
+    embeddings: EmbeddingSettings = field(default_factory=EmbeddingSettings)
     chunking: ChunkingSettings = field(default_factory=ChunkingSettings)
     retrieval: RetrievalSettings = field(default_factory=RetrievalSettings)
     enrichment: EnrichmentSettings = field(default_factory=EnrichmentSettings)
     generation: GenerationSettings = field(default_factory=GenerationSettings)
     app: AppSettings = field(default_factory=AppSettings)
+
+    @property
+    def debug(self) -> bool:
+        """Shortcut for app.debug."""
+        return self.app.debug
 
     def validate(self) -> bool:
         """Validate that required settings are configured."""
@@ -161,6 +169,47 @@ class Settings:
 
 
 # Global settings instance
+_settings: Optional[Settings] = None
+
+
+def load_settings() -> Settings:
+    """
+    Load and return application settings.
+
+    Returns:
+        Settings instance
+
+    Raises:
+        ValueError: If required settings are not configured
+    """
+    global _settings
+
+    if _settings is None:
+        _settings = Settings()
+
+    errors = _settings.get_validation_errors()
+    if errors:
+        raise ValueError(f"Configuration errors: {', '.join(errors)}")
+
+    return _settings
+
+
+def get_settings() -> Settings:
+    """
+    Get the current settings instance without validation.
+
+    Returns:
+        Settings instance
+    """
+    global _settings
+
+    if _settings is None:
+        _settings = Settings()
+
+    return _settings
+
+
+# Backwards compatibility
 settings = Settings()
 
 

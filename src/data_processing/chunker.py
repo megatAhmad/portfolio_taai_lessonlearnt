@@ -1,8 +1,8 @@
 """Text chunking for lessons learned with metadata preservation."""
 
 from typing import List, Dict, Any, Optional
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.schema import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
 import logging
 
 from .preprocessor import combine_lesson_text, preprocess_text
