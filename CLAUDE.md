@@ -9,15 +9,16 @@ This is a **Proof of Concept (PoC) RAG (Retrieval-Augmented Generation) System**
 | **Domain** | Oil & Gas Industry (Turnaround Maintenance) |
 | **Status** | Specification/Planning Phase |
 | **Target User** | Claude Opus (Agentic Coding) |
-| **Interface** | Streamlit web application |
+| **Interface** | Streamlit web application (3-tab layout) |
 | **Deployment** | Local development environment |
 | **Budget** | <$10/month Azure OpenAI costs |
 
 ### Key Objectives
 1. Accept Excel uploads containing lessons learned records and job descriptions
-2. Use hybrid retrieval (dense + sparse search) to find relevant lessons for each job
-3. Generate AI-powered relevance analysis explaining why lessons apply
-4. Present results in an intuitive UI with filtering and export capabilities
+2. **Auto-generate metadata enrichment using LLM** (equipment type, applicability, procedures)
+3. Use **multi-tier hybrid retrieval** (equipment-specific → type → generic → semantic)
+4. Generate AI-powered relevance analysis explaining why lessons apply
+5. Present results in an intuitive 3-tab UI with filtering and export capabilities
 
 ## Quick Start Commands
 
@@ -44,10 +45,11 @@ DEBUG=true streamlit run app.py
 | RAG Framework | LangChain | Latest stable |
 | Vector Database | ChromaDB | Latest (with persistence) |
 | Embeddings | Azure OpenAI text-embedding-3-small | 1536 dimensions |
-| LLM | Azure OpenAI GPT-4o-mini | Temperature: 0.3 |
+| LLM | Azure OpenAI GPT-4o-mini | Temperature: 0.3 (analysis), 0.1 (enrichment) |
 | Sparse Search | rank_bm25 | Latest |
 | Reranker | sentence-transformers cross-encoder | ms-marco-MiniLM-L-6-v2 |
 | Data Processing | pandas + openpyxl + pandera | Latest stable |
+| JSON Validation | pydantic | ≥2.5.0 |
 | Retry Logic | tenacity | ≥8.2.3 |
 | Token Counting | tiktoken | ≥0.5.2 |
 
@@ -62,13 +64,14 @@ maintenance_rag_poc/
 ├── README.md                     # Setup and usage instructions
 ├── CLAUDE.md                     # This file - AI assistant guide
 ├── maintenance_rag_project_requirements.md  # Full project specification
-├── app.py                        # Main Streamlit application entry point
+├── app.py                        # Main Streamlit application (3-tab layout)
 ├── config/
 │   ├── __init__.py
 │   ├── settings.py               # Configuration management (env vars, params)
-│   └── prompts.py                # LLM prompt templates
+│   └── prompts.py                # LLM prompt templates (relevance + enrichment)
 ├── data/
-│   ├── sample_lessons.xlsx       # Sample lessons learned (20-50 records)
+│   ├── sample_lessons.xlsx       # Sample lessons learned (basic columns only)
+│   ├── sample_lessons_enriched.xlsx  # Sample with enrichment (for demo)
 │   └── sample_jobs.xlsx          # Sample job descriptions (10-20 records)
 ├── src/
 │   ├── __init__.py
@@ -76,13 +79,14 @@ maintenance_rag_poc/
 │   │   ├── __init__.py
 │   │   ├── excel_loader.py       # Excel file reading and validation
 │   │   ├── preprocessor.py       # Text cleaning, abbreviation expansion
-│   │   └── chunker.py            # Text chunking (~500 tokens, 100 overlap)
+│   │   ├── chunker.py            # Text chunking (~500 tokens, 100 overlap)
+│   │   └── enrichment.py         # NEW: LLM metadata enrichment pipeline
 │   ├── retrieval/
 │   │   ├── __init__.py
 │   │   ├── embeddings.py         # Azure OpenAI embeddings with caching
-│   │   ├── vector_store.py       # ChromaDB operations
+│   │   ├── vector_store.py       # ChromaDB operations with metadata
 │   │   ├── bm25_search.py        # BM25 sparse retrieval
-│   │   ├── hybrid_search.py      # RRF fusion algorithm
+│   │   ├── hybrid_search.py      # Multi-tier RRF fusion with boosting
 │   │   └── reranker.py           # Cross-encoder reranking
 │   ├── generation/
 │   │   ├── __init__.py
@@ -90,6 +94,9 @@ maintenance_rag_poc/
 │   └── ui/
 │       ├── __init__.py
 │       ├── components.py         # Reusable Streamlit components
+│       ├── tab_upload.py         # NEW: Tab 1 - Upload & Enrichment
+│       ├── tab_review.py         # NEW: Tab 2 - Enrichment Review
+│       ├── tab_matching.py       # NEW: Tab 3 - Job Matching
 │       └── utils.py              # UI helper functions
 ├── chroma_db/                    # ChromaDB persistence (GITIGNORED)
 └── tests/
@@ -102,65 +109,60 @@ maintenance_rag_poc/
 | File | Purpose |
 |------|---------|
 | `maintenance_rag_project_requirements.md` | **Complete project specification** - Read this first for full context |
-| `app.py` | Main entry point, orchestrates UI flow, manages session state |
+| `app.py` | Main entry point, 3-tab layout, session state management |
 | `config/settings.py` | All configuration - no hardcoded values elsewhere |
-| `config/prompts.py` | LLM prompt templates with variables |
-| `src/data_processing/excel_loader.py` | Validates Excel schema using Pandera |
-| `src/retrieval/hybrid_search.py` | Core RAG logic - RRF fusion |
-| `src/generation/relevance_analyzer.py` | GPT-4o-mini structured prompting |
+| `config/prompts.py` | LLM prompts for relevance analysis AND enrichment |
+| `src/data_processing/enrichment.py` | **NEW**: LLM metadata enrichment pipeline |
+| `src/retrieval/hybrid_search.py` | **Multi-tier** RRF fusion with score boosting |
+| `src/generation/relevance_analyzer.py` | GPT-4o-mini with match type context |
+| `src/ui/tab_upload.py` | **NEW**: Upload & enrichment trigger UI |
+| `src/ui/tab_review.py` | **NEW**: Enrichment review dashboard UI |
+| `src/ui/tab_matching.py` | **NEW**: Job matching & results UI |
 
 ## Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    STREAMLIT UI LAYER                        │
-│  File Upload | Query Input | Results Display | Filtering    │
+│                 STREAMLIT UI (3-TAB LAYOUT)                  │
+│  Tab 1: Upload & Enrich | Tab 2: Review | Tab 3: Match      │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+┌─────────────────────▼───────────────────────────────────────┐
+│              LLM METADATA ENRICHMENT LAYER                   │
+│  GPT-4o-mini: Auto-generate 11 enrichment columns           │
+│  (specificity_level, equipment_type, applicable_to, etc.)  │
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
 │                  PROCESSING LAYER                            │
 │  Excel Parser ──► Preprocessor ──► Text Chunker             │
+│                    (with enrichment metadata)                │
 │                                                              │
 │  ┌────────────────────────────────────────────────────────┐ │
-│  │        HYBRID RETRIEVAL ENGINE                          │ │
-│  │  Dense Search (Embeddings) + Sparse Search (BM25)      │ │
+│  │        MULTI-TIER HYBRID RETRIEVAL ENGINE              │ │
+│  │  Tier 1: Equipment-Specific (boost 1.5x)               │ │
+│  │  Tier 2: Equipment-Type (boost 1.2x)                   │ │
+│  │  Tier 3: Generic/Universal (boost 1.3x/1.4x)           │ │
+│  │  Tier 4: Semantic (no filter)                          │ │
 │  │              ↓                                          │ │
-│  │  Reciprocal Rank Fusion (RRF) ──► Cross-Encoder Rerank │ │
+│  │  RRF Fusion + Score Boosting ──► Cross-Encoder Rerank  │ │
 │  └────────────────────────────────────────────────────────┘ │
 │                                                              │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │      AZURE OPENAI GENERATION LAYER                      │ │
-│  │  GPT-4o-mini: Relevance Analysis & Explanations        │ │
+│  │  GPT-4o-mini: Relevance Analysis + Match Reasoning     │ │
 │  └────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
 │                  PERSISTENCE LAYER                           │
-│  ChromaDB (Vector Store) | Session State | Cache            │
+│  ChromaDB (with metadata) | Session State | Cache           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Retrieval Strategy
+## Two-Stage Data Model
 
-| Stage | Method | Output |
-|-------|--------|--------|
-| 1. Dense Search | Azure OpenAI embeddings → ChromaDB cosine similarity | Top 50 |
-| 2. Sparse Search | BM25 keyword matching | Top 50 |
-| 3. Fusion | Reciprocal Rank Fusion (RRF) with k=60 | Combined ranking |
-| 4. Reranking | Cross-encoder (ms-marco-MiniLM-L-6-v2) | Top 5 |
-
-**RRF Formula:**
-```python
-def rrf_score(rank, k=60):
-    """Calculate RRF score for combining rankings"""
-    return 1 / (k + rank)
-
-# combined_score = rrf_score(dense_rank) + rrf_score(sparse_rank)
-```
-
-## Data Formats
-
-### Lessons Learned Excel (Required Columns)
+### Stage 1: Basic Input (User Provides - 9 columns)
 | Column | Type | Description |
 |--------|------|-------------|
 | `lesson_id` | str | Unique identifier (e.g., "LL-001") |
@@ -173,15 +175,158 @@ def rrf_score(rank, k=60):
 | `date` | datetime (optional) | When lesson was learned |
 | `severity` | str (optional) | "low", "medium", "high", "critical" |
 
-### Job Descriptions Excel (Required Columns)
+### Stage 2: Auto-Generated Enrichment (LLM Creates - 11 columns)
 | Column | Type | Description |
 |--------|------|-------------|
-| `job_id` | str | Unique identifier (e.g., "JOB-001") |
-| `job_title` | str | Brief title |
-| `job_description` | str | Detailed work description |
-| `equipment_tag` | str (optional) | Equipment identifier |
-| `job_type` | str (optional) | "inspection", "repair", "replacement" |
-| `planned_date` | datetime (optional) | Scheduled execution date |
+| `specificity_level` | str | "equipment_id", "equipment_type", or "generic" |
+| `equipment_type` | str | e.g., "centrifugal_pump", "heat_exchanger" |
+| `equipment_family` | str | "rotating_equipment", "static_equipment", etc. |
+| `applicable_to` | str | Comma-separated: "all_pumps,all_seals" |
+| `procedure_tags` | str | Comma-separated: "installation,lockout_tagout" |
+| `lesson_scope` | str | "specific", "general", or "universal" |
+| `safety_categories` | str | Comma-separated: "lockout_tagout,pressure_release" |
+| `enrichment_confidence` | float | 0.0-1.0 confidence score |
+| `enrichment_timestamp` | datetime | When enrichment was performed |
+| `enrichment_reviewed` | bool | Whether user reviewed/approved |
+
+## LLM Metadata Enrichment Pipeline
+
+### Enrichment Flow
+```
+Raw Excel Upload (9 basic columns)
+    ↓
+LLM Analysis (GPT-4o-mini, batch processing)
+    ↓
+Auto-Generated Metadata (11 additional columns)
+    ↓
+User Review & Approval Interface (Tab 2)
+    ↓
+Enriched Lessons → Multi-Tier RAG System
+```
+
+### Confidence Thresholds
+| Level | Score Range | Action |
+|-------|-------------|--------|
+| High | ≥0.85 | Auto-accept, no review needed |
+| Medium | 0.70-0.84 | Yellow flag, suggest review |
+| Low | <0.70 | Red flag, require user review |
+
+### Enrichment Prompt (Temperature: 0.1)
+```
+You are an expert maintenance data analyst specializing in Oil & Gas operations.
+Analyze the provided maintenance lesson learned and extract structured metadata.
+
+Return ONLY a valid JSON object with these fields:
+{
+  "specificity_level": "equipment_id" | "equipment_type" | "generic",
+  "equipment_type": "string or null",
+  "equipment_family": "rotating_equipment" | "static_equipment" | null,
+  "applicable_to": ["list", "of", "scopes"],
+  "procedure_tags": ["list", "of", "procedures"],
+  "lesson_scope": "specific" | "general" | "universal",
+  "safety_categories": ["list", "of", "safety", "categories"],
+  "confidence_score": 0.0-1.0
+}
+```
+
+### Cost Estimates
+- ~700 tokens per lesson (500 input + 200 output)
+- ~$0.0005 per lesson with GPT-4o-mini
+- 1000 lessons: ~$0.50 one-time enrichment cost
+
+## Multi-Tier Retrieval Strategy
+
+### Tier Flow
+```
+Job Query Input
+    ↓
+Extract Job Metadata (equipment_id, type, procedures)
+    ↓
+┌─────────────────────────────────────────────────────────┐
+│ TIER 1: Equipment-Specific Matches                     │
+│ Filter: equipment_id = job.equipment_id                │
+│ Retrieve: Top-10 | Boost: ×1.5                         │
+└────────────────────────┬────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────┐
+│ TIER 2: Equipment-Type Matches                         │
+│ Filter: equipment_type = job.equipment_type            │
+│ Retrieve: Top-20 | Boost: ×1.2                         │
+└────────────────────────┬────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────┐
+│ TIER 3: Generic/Universal Lessons                      │
+│ Filter: lesson_scope = "universal"                     │
+│ Retrieve: Top-20 | Boost: ×1.3 (universal), ×1.4 (critical) │
+└────────────────────────┬────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────┐
+│ TIER 4: Semantic Similarity (No Filter)                │
+│ Pure hybrid search on full text                        │
+│ Retrieve: Top-30 | No boost                            │
+└────────────────────────┬────────────────────────────────┘
+                         ↓
+         Combine All Tiers → Deduplicate → RRF → Rerank → Top-N
+```
+
+### Score Boosting Logic
+```python
+def calculate_boosted_score(base_score, lesson, job):
+    score = base_score
+
+    # Tier 1: Equipment-specific boost
+    if lesson['equipment_id'] == job['equipment_id']:
+        score *= 1.5
+
+    # Tier 2: Equipment-type boost
+    elif lesson['equipment_type'] == job['equipment_type']:
+        score *= 1.2
+
+    # Tier 3: Universal/generic boost
+    if lesson['lesson_scope'] == 'universal':
+        score *= 1.3
+
+    # Safety-critical boost (always)
+    if lesson.get('severity') == 'critical':
+        score *= 1.4
+
+    # Procedure overlap boost (+10% per match)
+    procedure_overlap = len(set(job_procedures) & set(lesson_procedures))
+    if procedure_overlap > 0:
+        score *= (1 + 0.1 * procedure_overlap)
+
+    return score
+```
+
+## Three-Tab UI Layout
+
+### Tab 1: Data Upload & Enrichment
+- File uploader for lessons Excel (9 basic columns)
+- Validation feedback and preview
+- "Start Enrichment" button with batch size selector
+- Progress indicator: "Processing 45/100 lessons (45%)"
+- Enrichment summary with confidence breakdown
+- Navigate to Tab 2 for review
+
+### Tab 2: Enrichment Review Dashboard
+- Side-by-side comparison: original lesson vs. enriched metadata
+- Color-coded confidence indicators (🟢🟡🔴)
+- Inline editing of enrichment tags
+- Batch approval for high-confidence items
+- Review progress tracker
+- Filter by confidence level, category, flags
+
+### Tab 3: Job Analysis & Matching
+- Upload job descriptions Excel
+- Select job to analyze
+- Search configuration with enrichment-based filters
+- Multi-tier retrieval with match type badges:
+  - 🎯 Equipment-Specific (blue)
+  - 🔧 Equipment-Type (green)
+  - ⚙️ Generic Process (orange)
+  - 💡 Semantic (purple)
+- AI relevance analysis with match reasoning
+- Export results to Excel
 
 ## Environment Configuration
 
@@ -192,41 +337,8 @@ AZURE_OPENAI_API_KEY=your-api-key-here
 AZURE_OPENAI_API_VERSION=2024-05-01-preview
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-small
 AZURE_OPENAI_CHAT_DEPLOYMENT=gpt-4o-mini
+AZURE_OPENAI_ENRICHMENT_DEPLOYMENT=gpt-4o-mini
 DEBUG=false
-```
-
-## LLM Configuration
-
-### System Prompt Template
-```
-You are an expert maintenance engineer analyzing the relevance between
-historical lessons learned and future maintenance jobs.
-
-Analyze the following lesson learned and job description. Provide:
-1. Relevance Score (0-100): How applicable is this lesson to the job
-2. Key Technical Links: Specific technical connections (equipment type, failure mode, procedures)
-3. Safety Considerations: Any safety implications from the lesson
-4. Recommended Actions: Specific steps to apply this lesson to the job
-
-Be concise and focus on actionable insights.
-```
-
-### Relevance Analysis Output Format
-```json
-{
-  "relevance_score": 85,
-  "technical_links": [
-    "Both involve centrifugal pump mechanical seals",
-    "Similar operating pressure (150 psi)",
-    "Same failure mode: seal face wear"
-  ],
-  "safety_considerations": "Ensure proper lockout/tagout procedures. Previous incident involved pressure release injury.",
-  "recommended_actions": [
-    "Review seal installation procedure from LL-001",
-    "Verify correct seal material for fluid service",
-    "Include additional technician training"
-  ]
-}
 ```
 
 ## Development Guidelines
@@ -234,101 +346,90 @@ Be concise and focus on actionable insights.
 ### Code Conventions
 - **Type hints** required for all function signatures
 - **PEP 8** style compliance
-- **Docstrings** for non-trivial functions
+- **Docstrings** for non-trivial functions (especially enrichment logic)
 - Functions should be **< 50 lines** where possible
 - **No hardcoded values** - use `config/settings.py`
 - Use `tenacity` for API retry logic (exponential backoff, max 6 attempts)
-
-### Text Chunking Parameters
-- Chunk size: ~500 tokens (~2000 characters)
-- Overlap: 100 tokens (~400 characters)
-- Separator priority: double newlines → single newlines → periods → spaces
-- Use LangChain's `RecursiveCharacterTextSplitter`
+- Use `pydantic` for structured enrichment output validation
 
 ### Error Handling
-- Implement error handling at API boundaries
+- Implement error handling at API boundaries (especially enrichment batches)
 - Use user-friendly messages in UI (no technical jargon)
 - Log errors without exposing API keys or secrets
 - Graceful handling of missing/null data fields
-- Exponential backoff with jitter for rate limits
+- Allow pause/resume for long-running enrichment batches
 
 ### Performance Targets
 | Operation | Target |
 |-----------|--------|
 | File upload & validation | <5 seconds (1000 rows) |
+| Enrichment processing | 2-5 seconds per lesson |
+| Batch enrichment (100 lessons) | 3-8 minutes |
 | Embedding generation | <30 seconds (100 lessons) |
-| Single job query | <10 seconds |
+| Single job query (multi-tier) | <15 seconds |
 | Full analysis (5 lessons) | <20 seconds |
 
 ### Cost Optimization
 - Cache embeddings using content hashes
-- Batch API calls (up to 100 texts per embedding call)
+- Cache enrichment results (don't re-enrich same lessons)
+- Batch API calls (10 lessons per enrichment batch)
 - Use tiktoken for token counting before API calls
-- Target: **<$10/month** Azure OpenAI costs
-- Embedding cost target: <$0.50/month
-- LLM cost target: <$5/month
+- Target: **<$10/month** Azure OpenAI costs total
+- Enrichment: ~$0.50 per 1000 lessons (one-time)
+- Ongoing RAG: <$5/month for typical PoC usage
 
 ## Implementation Phases
 
-### Phase 1: Core RAG Pipeline (HIGH Priority)
-- Excel data loading and validation
-- Text preprocessing and chunking
-- Azure OpenAI embedding generation
-- ChromaDB vector store setup
-- Basic dense retrieval (embeddings only)
+### Phase 1: Data Upload & Enrichment Pipeline (HIGH)
+- Excel loading and validation (basic 9 columns)
+- LLM metadata enrichment pipeline
+- Batch processing with progress tracking
+- Confidence scoring and flagging
+- Tab 1 UI: Upload and trigger enrichment
 
-### Phase 2: Hybrid Search & Reranking (HIGH Priority)
-- BM25 sparse retrieval implementation
-- RRF fusion logic
+### Phase 2: Enrichment Review UI (HIGH)
+- Tab 2: Enrichment review dashboard
+- Side-by-side comparison layout
+- Inline editing of enrichment tags
+- Batch approval operations
+- User correction tracking
+
+### Phase 3: Core RAG with Multi-Tier Retrieval (HIGH)
+- Text chunking with enrichment metadata
+- ChromaDB with metadata filtering
+- Multi-tier hybrid retrieval (4 tiers)
+- Score boosting logic
 - Cross-encoder reranking
-- Improved result quality
 
-### Phase 3: LLM Analysis Generation (MEDIUM Priority)
-- GPT-4o-mini integration for relevance analysis
-- Structured response parsing
-- Display AI-generated insights in UI
+### Phase 4: Job Matching & Analysis (MEDIUM)
+- Tab 3: Job upload and matching
+- GPT-4o-mini relevance analysis with match reasoning
+- Results display with match type badges
+- Excel export with enrichment metadata
 
-### Phase 4: UI Polish & Export (MEDIUM Priority)
-- Improved Streamlit layout with tabs/pages
-- Interactive filtering
-- Excel export functionality
-- Session state management
-
-### Phase 5: Optimization & Evaluation (LOW Priority)
+### Phase 5: UI Polish & Optimization (MEDIUM)
+- Improved layouts and visual design
+- Keyboard shortcuts for review tab
+- Session state optimization
 - Embedding caching
-- Performance profiling
-- Basic evaluation metrics (optional RAGAS)
+
+### Phase 6: Evaluation & Documentation (LOW)
+- Enrichment accuracy validation
+- Multi-tier retrieval effectiveness testing
 - Documentation and README
 
-## UI Specifications
+## Quality Metrics (PoC Targets)
 
-### Results Display
-- **Score Badges**: Color-coded (green >80%, orange 50-80%, red <50%)
-- **Lesson Cards**: Title, preview (200 chars), metadata, expandable details
-- **Export**: Excel file with Summary + Matched Lessons sheets
-
-### Session State
-- Persist uploaded data across page interactions
-- Cache processed embeddings
-- Maintain search results for filtering
-- "Reset" button to clear state
-
-## Testing & Validation
-
-### Test Scenarios
-1. **Positive Match**: Job clearly related to lesson (e.g., pump seal replacement → pump seal failure)
-2. **Negative Match**: Unrelated job should return low scores
-3. **Partial Match**: Somewhat related jobs ranked appropriately
-4. **Safety-Critical**: Hazardous jobs must surface safety lessons
-5. **Equipment-Specific**: Same equipment tag prioritized
-
-### Edge Cases to Handle
-- Empty Excel files
-- Missing required columns
-- Very short descriptions (<10 words)
-- Very long descriptions (>5000 words)
-- Special characters and encoding issues
-- Duplicate lesson IDs
+| Metric | Target |
+|--------|--------|
+| Enrichment accuracy | ≥70% accepted without major edits |
+| High confidence precision | ≥85% of high-confidence enrichments correct |
+| Safety detection recall | ≥90% of safety-critical lessons flagged |
+| MRR@5 (Mean Reciprocal Rank) | ≥0.6 |
+| Recall@10 | ≥0.7 |
+| Generic lesson inclusion | ≥30% of results when applicable |
+| User satisfaction | ≥70% rate as "useful" |
+| Safety lessons | No critical lessons missed |
 
 ## Security Considerations
 
@@ -337,36 +438,22 @@ Be concise and focus on actionable insights.
 - Validate and sanitize all user inputs
 - Use environment variables for all secrets
 - Sanitize file paths when handling uploads
-
-## Quality Metrics (PoC Targets)
-
-| Metric | Target |
-|--------|--------|
-| MRR@5 (Mean Reciprocal Rank) | ≥0.6 |
-| Recall@10 | ≥0.7 |
-| User satisfaction | ≥70% rate as "useful" |
-| Safety lessons | No critical lessons missed |
-
-## Out of Scope (PoC)
-
-- Authentication/user management
-- Production deployment/scalability
-- Real-time data integration
-- Multi-language support
-- Mobile responsiveness
-- Multi-tenancy
-- Version control for lessons database
+- User corrections should not expose sensitive data
 
 ## Troubleshooting
 
 ### Common Issues
 1. **Azure OpenAI connection errors**: Check `.env` configuration and API version
 2. **ChromaDB persistence issues**: Ensure `chroma_db/` directory exists and is writable
-3. **Memory issues with large files**: Implement chunked processing
-4. **Slow embedding generation**: Use batching (100 texts per call)
+3. **Enrichment timeout**: Reduce batch size, implement pause/resume
+4. **Low enrichment accuracy**: Iterate on prompt, check sample outputs
+5. **Generic lessons not surfacing**: Verify Tier 3 filtering and boost values
 
 ### Debug Mode
-Set `DEBUG=true` in `.env` to enable verbose logging and timing information.
+Set `DEBUG=true` in `.env` to enable verbose logging including:
+- Timing information for each processing stage
+- Confidence scores and flags for enrichment
+- Match type and tier information for retrieval
 
 ## Glossary
 
@@ -378,9 +465,13 @@ Set `DEBUG=true` in `.env` to enable verbose logging and timing information.
 | **Hybrid Search** | Combining dense and sparse retrieval |
 | **RRF** | Reciprocal Rank Fusion - combines multiple ranked lists |
 | **Cross-Encoder** | Neural network that scores query-document pairs |
-| **ChromaDB** | Open-source vector database for embeddings |
-| **Turnaround Maintenance** | Planned shutdown period for major maintenance |
-| **Lessons Learned** | Documented knowledge from past incidents/projects |
+| **Metadata Enrichment** | LLM-powered extraction of structured tags from lesson text |
+| **Specificity Level** | Classification: equipment_id, equipment_type, or generic |
+| **Lesson Scope** | Breadth of applicability: specific, general, or universal |
+| **Multi-Tier Retrieval** | Search across 4 tiers with different filters and boosts |
+| **Score Boosting** | Multiplicative adjustment based on match type/safety |
+| **Match Type** | Why lesson matched: equipment_specific, type, generic, semantic |
+| **Confidence Score** | LLM's self-assessed enrichment accuracy (0.0-1.0) |
 
 ## References
 
@@ -392,6 +483,13 @@ Set `DEBUG=true` in `.env` to enable verbose logging and timing information.
 
 ---
 
-**Version**: 1.1
+**Version**: 2.0
 **Last Updated**: January 2026
 **Project Author**: Megat (Oil & Gas Maintenance AI Systems)
+
+**Major Changes from v1.0**:
+- Added LLM-powered metadata enrichment pipeline
+- Introduced 3-tab Streamlit UI (Upload → Review → Match)
+- Implemented multi-tier hybrid retrieval with score boosting
+- Enhanced to handle equipment-specific, equipment-type, and generic lessons
+- Expanded data model from 9 to 20 columns (11 auto-generated)
