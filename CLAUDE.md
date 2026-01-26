@@ -4,42 +4,59 @@
 
 This is a **Proof of Concept (PoC) RAG (Retrieval-Augmented Generation) System** for analyzing oil and gas turnaround maintenance lessons learned records. The system identifies relevant historical lessons for future maintenance jobs to improve safety and efficiency.
 
-**Domain:** Oil & Gas Industry (Turnaround Maintenance)
-**Status:** Specification/Planning Phase - Implementation not yet started
-**Target User:** Claude Opus (Agentic Coding)
+| Attribute | Value |
+|-----------|-------|
+| **Domain** | Oil & Gas Industry (Turnaround Maintenance) |
+| **Status** | Specification/Planning Phase |
+| **Target User** | Claude Opus (Agentic Coding) |
+| **Interface** | Streamlit web application |
+| **Deployment** | Local development environment |
+| **Budget** | <$10/month Azure OpenAI costs |
+
+### Key Objectives
+1. Accept Excel uploads containing lessons learned records and job descriptions
+2. Use hybrid retrieval (dense + sparse search) to find relevant lessons for each job
+3. Generate AI-powered relevance analysis explaining why lessons apply
+4. Present results in an intuitive UI with filtering and export capabilities
 
 ## Quick Start Commands
 
 ```bash
-# Install dependencies (when requirements.txt exists)
+# Install dependencies
 pip install -r requirements.txt
 
-# Run the Streamlit application (when app.py exists)
+# Run the Streamlit application
 streamlit run app.py
 
-# Run tests (when tests exist)
+# Run tests
 pytest tests/
+
+# Run with debug mode
+DEBUG=true streamlit run app.py
 ```
 
 ## Technology Stack
 
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| Language | Python ≥3.10 | Core development |
-| Web Framework | Streamlit ≥1.30.0 | UI layer |
-| RAG Framework | LangChain | Orchestrates RAG pipeline |
-| Vector Database | ChromaDB | Stores embeddings |
-| Embeddings | Azure OpenAI text-embedding-3-small | 1536-dimensional vectors |
-| LLM | Azure OpenAI GPT-4o-mini | Relevance analysis generation |
-| Sparse Search | rank_bm25 | Keyword-based retrieval |
-| Reranker | sentence-transformers cross-encoder | Result reranking |
-| Data Processing | pandas + openpyxl + pandera | Excel handling & validation |
+| Component | Technology | Version/Spec |
+|-----------|-----------|--------------|
+| Language | Python | ≥3.10 |
+| Web Framework | Streamlit | ≥1.30.0 |
+| RAG Framework | LangChain | Latest stable |
+| Vector Database | ChromaDB | Latest (with persistence) |
+| Embeddings | Azure OpenAI text-embedding-3-small | 1536 dimensions |
+| LLM | Azure OpenAI GPT-4o-mini | Temperature: 0.3 |
+| Sparse Search | rank_bm25 | Latest |
+| Reranker | sentence-transformers cross-encoder | ms-marco-MiniLM-L-6-v2 |
+| Data Processing | pandas + openpyxl + pandera | Latest stable |
+| Retry Logic | tenacity | ≥8.2.3 |
+| Token Counting | tiktoken | ≥0.5.2 |
 
-## Project Structure (Planned)
+## Project Structure
 
 ```
 maintenance_rag_poc/
 ├── .env                          # Azure OpenAI credentials (GITIGNORED)
+├── .env.example                  # Template for environment variables
 ├── .gitignore                    # Standard Python gitignore
 ├── requirements.txt              # Python dependencies
 ├── README.md                     # Setup and usage instructions
@@ -95,39 +112,76 @@ maintenance_rag_poc/
 ## Architecture Overview
 
 ```
-Streamlit UI Layer
-    ↓
-Processing Layer (Excel parsing → Preprocessing → Chunking)
-    ↓
-Hybrid Retrieval Engine (Dense + Sparse → RRF Fusion → Reranking)
-    ↓
-Azure OpenAI Generation (GPT-4o-mini relevance analysis)
-    ↓
-Results Display & Export
+┌─────────────────────────────────────────────────────────────┐
+│                    STREAMLIT UI LAYER                        │
+│  File Upload | Query Input | Results Display | Filtering    │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+┌─────────────────────▼───────────────────────────────────────┐
+│                  PROCESSING LAYER                            │
+│  Excel Parser ──► Preprocessor ──► Text Chunker             │
+│                                                              │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │        HYBRID RETRIEVAL ENGINE                          │ │
+│  │  Dense Search (Embeddings) + Sparse Search (BM25)      │ │
+│  │              ↓                                          │ │
+│  │  Reciprocal Rank Fusion (RRF) ──► Cross-Encoder Rerank │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │      AZURE OPENAI GENERATION LAYER                      │ │
+│  │  GPT-4o-mini: Relevance Analysis & Explanations        │ │
+│  └────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+                      │
+┌─────────────────────▼───────────────────────────────────────┐
+│                  PERSISTENCE LAYER                           │
+│  ChromaDB (Vector Store) | Session State | Cache            │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ### Retrieval Strategy
-1. **Dense Search**: Azure OpenAI embeddings → ChromaDB cosine similarity → Top 50
-2. **Sparse Search**: BM25 keyword matching → Top 50
-3. **Fusion**: Reciprocal Rank Fusion (RRF) with k=60
-4. **Reranking**: Cross-encoder (ms-marco-MiniLM-L-6-v2) → Top 5
+
+| Stage | Method | Output |
+|-------|--------|--------|
+| 1. Dense Search | Azure OpenAI embeddings → ChromaDB cosine similarity | Top 50 |
+| 2. Sparse Search | BM25 keyword matching | Top 50 |
+| 3. Fusion | Reciprocal Rank Fusion (RRF) with k=60 | Combined ranking |
+| 4. Reranking | Cross-encoder (ms-marco-MiniLM-L-6-v2) | Top 5 |
+
+**RRF Formula:**
+```python
+def rrf_score(rank, k=60):
+    """Calculate RRF score for combining rankings"""
+    return 1 / (k + rank)
+
+# combined_score = rrf_score(dense_rank) + rrf_score(sparse_rank)
+```
 
 ## Data Formats
 
 ### Lessons Learned Excel (Required Columns)
-- `lesson_id` (str): Unique identifier
-- `title` (str): Brief title/summary
-- `description` (str): Detailed problem description
-- `root_cause` (str): Root cause analysis
-- `corrective_action` (str): Actions taken
-- `category` (str): "mechanical", "electrical", "safety", "process"
-- Optional: `equipment_tag`, `date`, `severity`
+| Column | Type | Description |
+|--------|------|-------------|
+| `lesson_id` | str | Unique identifier (e.g., "LL-001") |
+| `title` | str | Brief title/summary |
+| `description` | str | Detailed problem description (≥10 chars) |
+| `root_cause` | str | Root cause analysis findings |
+| `corrective_action` | str | Actions taken to resolve |
+| `category` | str | "mechanical", "electrical", "safety", "process" |
+| `equipment_tag` | str (optional) | Equipment ID (e.g., "P-101", "HX-205") |
+| `date` | datetime (optional) | When lesson was learned |
+| `severity` | str (optional) | "low", "medium", "high", "critical" |
 
 ### Job Descriptions Excel (Required Columns)
-- `job_id` (str): Unique identifier
-- `job_title` (str): Brief title
-- `job_description` (str): Detailed work description
-- Optional: `equipment_tag`, `job_type`, `planned_date`
+| Column | Type | Description |
+|--------|------|-------------|
+| `job_id` | str | Unique identifier (e.g., "JOB-001") |
+| `job_title` | str | Brief title |
+| `job_description` | str | Detailed work description |
+| `equipment_tag` | str (optional) | Equipment identifier |
+| `job_type` | str (optional) | "inspection", "repair", "replacement" |
+| `planned_date` | datetime (optional) | Scheduled execution date |
 
 ## Environment Configuration
 
@@ -138,6 +192,41 @@ AZURE_OPENAI_API_KEY=your-api-key-here
 AZURE_OPENAI_API_VERSION=2024-05-01-preview
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-small
 AZURE_OPENAI_CHAT_DEPLOYMENT=gpt-4o-mini
+DEBUG=false
+```
+
+## LLM Configuration
+
+### System Prompt Template
+```
+You are an expert maintenance engineer analyzing the relevance between
+historical lessons learned and future maintenance jobs.
+
+Analyze the following lesson learned and job description. Provide:
+1. Relevance Score (0-100): How applicable is this lesson to the job
+2. Key Technical Links: Specific technical connections (equipment type, failure mode, procedures)
+3. Safety Considerations: Any safety implications from the lesson
+4. Recommended Actions: Specific steps to apply this lesson to the job
+
+Be concise and focus on actionable insights.
+```
+
+### Relevance Analysis Output Format
+```json
+{
+  "relevance_score": 85,
+  "technical_links": [
+    "Both involve centrifugal pump mechanical seals",
+    "Similar operating pressure (150 psi)",
+    "Same failure mode: seal face wear"
+  ],
+  "safety_considerations": "Ensure proper lockout/tagout procedures. Previous incident involved pressure release injury.",
+  "recommended_actions": [
+    "Review seal installation procedure from LL-001",
+    "Verify correct seal material for fluid service",
+    "Include additional technician training"
+  ]
+}
 ```
 
 ## Development Guidelines
@@ -148,13 +237,20 @@ AZURE_OPENAI_CHAT_DEPLOYMENT=gpt-4o-mini
 - **Docstrings** for non-trivial functions
 - Functions should be **< 50 lines** where possible
 - **No hardcoded values** - use `config/settings.py`
-- Use `tenacity` for API retry logic (exponential backoff)
+- Use `tenacity` for API retry logic (exponential backoff, max 6 attempts)
+
+### Text Chunking Parameters
+- Chunk size: ~500 tokens (~2000 characters)
+- Overlap: 100 tokens (~400 characters)
+- Separator priority: double newlines → single newlines → periods → spaces
+- Use LangChain's `RecursiveCharacterTextSplitter`
 
 ### Error Handling
 - Implement error handling at API boundaries
 - Use user-friendly messages in UI (no technical jargon)
 - Log errors without exposing API keys or secrets
 - Graceful handling of missing/null data fields
+- Exponential backoff with jitter for rate limits
 
 ### Performance Targets
 | Operation | Target |
@@ -169,46 +265,70 @@ AZURE_OPENAI_CHAT_DEPLOYMENT=gpt-4o-mini
 - Batch API calls (up to 100 texts per embedding call)
 - Use tiktoken for token counting before API calls
 - Target: **<$10/month** Azure OpenAI costs
+- Embedding cost target: <$0.50/month
+- LLM cost target: <$5/month
 
 ## Implementation Phases
 
-1. **Phase 1 (HIGH)**: Core RAG Pipeline
-   - Excel loading, validation, chunking
-   - Azure embeddings, ChromaDB setup
-   - Basic dense retrieval
+### Phase 1: Core RAG Pipeline (HIGH Priority)
+- Excel data loading and validation
+- Text preprocessing and chunking
+- Azure OpenAI embedding generation
+- ChromaDB vector store setup
+- Basic dense retrieval (embeddings only)
 
-2. **Phase 2 (HIGH)**: Hybrid Search & Reranking
-   - BM25 sparse retrieval
-   - RRF fusion, cross-encoder reranking
+### Phase 2: Hybrid Search & Reranking (HIGH Priority)
+- BM25 sparse retrieval implementation
+- RRF fusion logic
+- Cross-encoder reranking
+- Improved result quality
 
-3. **Phase 3 (MEDIUM)**: LLM Analysis Generation
-   - GPT-4o-mini integration
-   - Structured response parsing
+### Phase 3: LLM Analysis Generation (MEDIUM Priority)
+- GPT-4o-mini integration for relevance analysis
+- Structured response parsing
+- Display AI-generated insights in UI
 
-4. **Phase 4 (MEDIUM)**: UI Polish & Export
-   - Streamlit layout improvements
-   - Interactive filtering, Excel export
+### Phase 4: UI Polish & Export (MEDIUM Priority)
+- Improved Streamlit layout with tabs/pages
+- Interactive filtering
+- Excel export functionality
+- Session state management
 
-5. **Phase 5 (LOW)**: Optimization & Evaluation
-   - Embedding caching, performance profiling
-   - Optional RAGAS metrics
+### Phase 5: Optimization & Evaluation (LOW Priority)
+- Embedding caching
+- Performance profiling
+- Basic evaluation metrics (optional RAGAS)
+- Documentation and README
 
-## Common Tasks
+## UI Specifications
 
-### Adding a New Module
-1. Create file in appropriate `src/` subdirectory
-2. Add `__init__.py` exports
-3. Use type hints and docstrings
-4. Import configuration from `config/settings.py`
+### Results Display
+- **Score Badges**: Color-coded (green >80%, orange 50-80%, red <50%)
+- **Lesson Cards**: Title, preview (200 chars), metadata, expandable details
+- **Export**: Excel file with Summary + Matched Lessons sheets
 
-### Modifying Prompts
-Edit `config/prompts.py` - all LLM prompts are centralized there.
+### Session State
+- Persist uploaded data across page interactions
+- Cache processed embeddings
+- Maintain search results for filtering
+- "Reset" button to clear state
 
-### Adding Data Validation Rules
-Update schema definitions in `src/data_processing/excel_loader.py` using Pandera.
+## Testing & Validation
 
-### Testing Retrieval Quality
-Use sample data in `data/` directory with known ground truth matches.
+### Test Scenarios
+1. **Positive Match**: Job clearly related to lesson (e.g., pump seal replacement → pump seal failure)
+2. **Negative Match**: Unrelated job should return low scores
+3. **Partial Match**: Somewhat related jobs ranked appropriately
+4. **Safety-Critical**: Hazardous jobs must surface safety lessons
+5. **Equipment-Specific**: Same equipment tag prioritized
+
+### Edge Cases to Handle
+- Empty Excel files
+- Missing required columns
+- Very short descriptions (<10 words)
+- Very long descriptions (>5000 words)
+- Special characters and encoding issues
+- Duplicate lesson IDs
 
 ## Security Considerations
 
@@ -220,10 +340,12 @@ Use sample data in `data/` directory with known ground truth matches.
 
 ## Quality Metrics (PoC Targets)
 
-- MRR@5 (Mean Reciprocal Rank): ≥0.6
-- Recall@10: ≥0.7
-- User satisfaction: ≥70% rate results as "useful"
-- No critical safety lessons missed in test cases
+| Metric | Target |
+|--------|--------|
+| MRR@5 (Mean Reciprocal Rank) | ≥0.6 |
+| Recall@10 | ≥0.7 |
+| User satisfaction | ≥70% rate as "useful" |
+| Safety lessons | No critical lessons missed |
 
 ## Out of Scope (PoC)
 
@@ -233,11 +355,11 @@ Use sample data in `data/` directory with known ground truth matches.
 - Multi-language support
 - Mobile responsiveness
 - Multi-tenancy
+- Version control for lessons database
 
 ## Troubleshooting
 
 ### Common Issues
-
 1. **Azure OpenAI connection errors**: Check `.env` configuration and API version
 2. **ChromaDB persistence issues**: Ensure `chroma_db/` directory exists and is writable
 3. **Memory issues with large files**: Implement chunked processing
@@ -245,6 +367,20 @@ Use sample data in `data/` directory with known ground truth matches.
 
 ### Debug Mode
 Set `DEBUG=true` in `.env` to enable verbose logging and timing information.
+
+## Glossary
+
+| Term | Definition |
+|------|------------|
+| **RAG** | Retrieval-Augmented Generation - combines retrieval with generative AI |
+| **Dense Retrieval** | Semantic search using vector embeddings |
+| **Sparse Retrieval** | Keyword-based search (BM25) |
+| **Hybrid Search** | Combining dense and sparse retrieval |
+| **RRF** | Reciprocal Rank Fusion - combines multiple ranked lists |
+| **Cross-Encoder** | Neural network that scores query-document pairs |
+| **ChromaDB** | Open-source vector database for embeddings |
+| **Turnaround Maintenance** | Planned shutdown period for major maintenance |
+| **Lessons Learned** | Documented knowledge from past incidents/projects |
 
 ## References
 
@@ -256,6 +392,6 @@ Set `DEBUG=true` in `.env` to enable verbose logging and timing information.
 
 ---
 
-**Version**: 1.0
+**Version**: 1.1
 **Last Updated**: January 2026
 **Project Author**: Megat (Oil & Gas Maintenance AI Systems)
