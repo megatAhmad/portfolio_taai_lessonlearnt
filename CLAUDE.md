@@ -90,7 +90,8 @@ maintenance_rag_poc/
 │   │   └── reranker.py           # Cross-encoder reranking
 │   ├── generation/
 │   │   ├── __init__.py
-│   │   └── relevance_analyzer.py # GPT-4o-mini structured analysis
+│   │   ├── relevance_analyzer.py # GPT-4o-mini structured analysis
+│   │   └── applicability_checker.py # NEW: AI applicability assessment
 │   └── ui/
 │       ├── __init__.py
 │       ├── components.py         # Reusable Streamlit components
@@ -115,6 +116,7 @@ maintenance_rag_poc/
 | `src/data_processing/enrichment.py` | **NEW**: LLM metadata enrichment pipeline |
 | `src/retrieval/hybrid_search.py` | **Multi-tier** RRF fusion with score boosting |
 | `src/generation/relevance_analyzer.py` | GPT-4o-mini with match type context |
+| `src/generation/applicability_checker.py` | **NEW**: AI applicability assessment (Yes/No/Cannot Determine) |
 | `src/ui/tab_upload.py` | **NEW**: Upload & enrichment trigger UI |
 | `src/ui/tab_review.py` | **NEW**: Enrichment review dashboard UI |
 | `src/ui/tab_matching.py` | **NEW**: Job matching & results UI |
@@ -234,6 +236,52 @@ Return ONLY a valid JSON object with these fields:
 - ~$0.0005 per lesson with GPT-4o-mini
 - 1000 lessons: ~$0.50 one-time enrichment cost
 
+## AI Applicability Checking
+
+### Overview
+Beyond finding similar lessons, the system includes an **AI-powered applicability checker** that assesses whether each matched lesson is truly applicable to the specific job context.
+
+### Decision Types
+| Decision | Description | Display |
+|----------|-------------|---------|
+| **YES** | Lesson is directly applicable to the job | ✅ Applicable |
+| **NO** | Lesson is NOT applicable to this job | ❌ Not Applicable |
+| **CANNOT BE DETERMINED** | Insufficient information to decide | ⚠️ Cannot Determine |
+
+### Criteria for "NO" Decisions
+The AI marks a lesson as NOT applicable when:
+1. **Mitigation Already Applied**: The job steps/procedures already include the corrective action from the lesson
+2. **Risk Does Not Exist**: The job context is fundamentally different and the risk scenario cannot occur
+3. **Equipment Incompatibility**: The lesson applies to equipment/systems fundamentally different from the job scope
+4. **Procedural Mismatch**: The lesson's context (installation, maintenance, commissioning) doesn't match the job type
+
+### Output Schema
+```json
+{
+  "decision": "yes" | "no" | "cannot_be_determined",
+  "justification": "Detailed explanation (2-4 sentences)",
+  "mitigation_already_applied": true/false,
+  "risk_not_present": true/false,
+  "key_factors": ["factor1", "factor2", "factor3"],
+  "confidence": 0.0-1.0
+}
+```
+
+### Integration with Matching Workflow
+```
+Matched Lessons (from Multi-Tier Retrieval)
+    ↓
+AI Relevance Analysis (similarity scoring)
+    ↓
+AI Applicability Check (Yes/No/Cannot Determine)
+    ↓
+Results Display with Decision Badges
+    ↓
+Filter by Applicability Decision
+    ↓
+Export to Excel (includes justifications)
+```
+
 ## Multi-Tier Retrieval Strategy
 
 ### Tier Flow
@@ -326,7 +374,12 @@ def calculate_boosted_score(base_score, lesson, job):
   - ⚙️ Generic Process (orange)
   - 💡 Semantic (purple)
 - AI relevance analysis with match reasoning
-- Export results to Excel
+- **NEW: AI applicability checking** with decision badges:
+  - ✅ Applicable (green) - Lesson directly applies to job
+  - ❌ Not Applicable (red) - Mitigation already applied or risk doesn't exist
+  - ⚠️ Cannot Determine (orange) - Insufficient information
+- Filter results by applicability decision
+- Export results to Excel (includes applicability justifications)
 
 ## Environment Configuration
 

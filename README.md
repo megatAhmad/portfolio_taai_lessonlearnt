@@ -28,6 +28,7 @@ This proof-of-concept application helps maintenance teams:
 - Hybrid search (dense embeddings + sparse BM25)
 - Cross-encoder reranking
 - Relevance analysis with actionable recommendations
+- **Applicability checking** - AI determines if lessons truly apply to jobs (Yes/No/Cannot Determine)
 
 ## Technology Stack
 
@@ -135,8 +136,14 @@ The application will open in your browser at `http://localhost:8501`.
 5. **Match Jobs**
    - Go to "Match & Analyze" tab
    - Select a job from the list
+   - Enable "Check applicability" option (recommended)
    - Click "Find Matches" to retrieve relevant lessons
-   - Export results to Excel
+   - Review AI applicability decisions:
+     - ✅ Applicable - Lesson directly applies
+     - ❌ Not Applicable - Mitigation exists or risk doesn't apply
+     - ⚠️ Cannot Determine - Insufficient information
+   - Filter by applicability decision
+   - Export results to Excel (includes justifications)
 
 ## Data Formats
 
@@ -201,7 +208,8 @@ portfolio_taai_lessonlearnt/
 │   │   ├── hybrid_search.py  # Multi-tier hybrid search
 │   │   └── reranker.py       # Cross-encoder reranking
 │   ├── generation/
-│   │   └── relevance_analyzer.py  # GPT-4o-mini analysis
+│   │   ├── relevance_analyzer.py  # GPT-4o-mini analysis
+│   │   └── applicability_checker.py # AI applicability assessment
 │   └── ui/
 │       ├── components.py     # Reusable UI components
 │       ├── utils.py          # UI utilities

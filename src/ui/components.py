@@ -399,3 +399,148 @@ def render_warning_message(message: str) -> None:
         message: Warning message
     """
     st.warning(message)
+
+
+def render_applicability_result(
+    applicability: Dict[str, Any],
+    lesson: Dict[str, Any],
+    show_details: bool = True,
+) -> None:
+    """
+    Render an applicability check result.
+
+    Args:
+        applicability: Applicability check result dictionary
+        lesson: Original lesson dictionary
+        show_details: Whether to show detailed justification
+    """
+    decision = applicability.get("decision", "cannot_be_determined")
+    decision_display = applicability.get("decision_display", "Unknown")
+    decision_emoji = applicability.get("decision_emoji", "❓")
+    justification = applicability.get("justification", "")
+    confidence = applicability.get("confidence", 0.0)
+
+    # Decision badge styling
+    decision_colors = {
+        "yes": "background-color: #d4edda; color: #155724; padding: 2px 8px; border-radius: 4px;",
+        "no": "background-color: #f8d7da; color: #721c24; padding: 2px 8px; border-radius: 4px;",
+        "cannot_be_determined": "background-color: #fff3cd; color: #856404; padding: 2px 8px; border-radius: 4px;",
+    }
+    badge_style = decision_colors.get(decision, decision_colors["cannot_be_determined"])
+
+    # Render the result
+    st.markdown(
+        f"**Applicability:** <span style='{badge_style}'>{decision_emoji} {decision_display}</span> "
+        f"(Confidence: {confidence:.0%})",
+        unsafe_allow_html=True
+    )
+
+    if show_details and justification:
+        st.markdown(f"**Justification:** {justification}")
+
+        # Show additional flags
+        flags = []
+        if applicability.get("mitigation_already_applied"):
+            flags.append("Mitigation already in job steps")
+        if applicability.get("risk_not_present"):
+            flags.append("Risk does not exist in job context")
+
+        if flags:
+            st.markdown("**Flags:**")
+            for flag in flags:
+                st.markdown(f"- {flag}")
+
+        # Show key factors
+        key_factors = applicability.get("key_factors", [])
+        if key_factors:
+            st.markdown("**Key Factors:**")
+            for factor in key_factors:
+                st.markdown(f"- {factor}")
+
+
+def render_match_result_with_applicability(
+    result: Dict[str, Any],
+    lesson: Dict[str, Any],
+    applicability: Optional[Dict[str, Any]] = None,
+    rank: int = 0,
+    show_details: bool = True,
+) -> None:
+    """
+    Render a matching result with relevance analysis and applicability check.
+
+    Args:
+        result: Relevance analysis result
+        lesson: Original lesson dictionary
+        applicability: Optional applicability check result
+        rank: Rank position
+        show_details: Whether to show detailed analysis
+    """
+    lesson_id = result.get("lesson_id", "Unknown")
+    relevance_score = result.get("relevance_score", 0)
+    match_tier = result.get("match_tier", "semantic")
+    title = lesson.get("title", "No title")
+
+    with st.container():
+        # Header with rank, score, tier, and applicability
+        if applicability:
+            header_cols = st.columns([0.5, 2.5, 1, 1, 1.5])
+        else:
+            header_cols = st.columns([0.5, 3, 1, 1.5])
+
+        with header_cols[0]:
+            st.markdown(f"**#{rank}**")
+
+        with header_cols[1]:
+            st.markdown(f"**{lesson_id}**: {title}")
+
+        with header_cols[2]:
+            st.markdown(format_relevance_badge(relevance_score))
+
+        with header_cols[3]:
+            st.markdown(format_tier_badge(match_tier))
+
+        # Show applicability badge in header if available
+        if applicability:
+            with header_cols[4]:
+                decision = applicability.get("decision", "cannot_be_determined")
+                decision_emoji = applicability.get("decision_emoji", "❓")
+                decision_display = applicability.get("decision_display", "Unknown")
+                st.markdown(f"{decision_emoji} **{decision_display}**")
+
+        # Match reasoning
+        if result.get("match_reasoning"):
+            st.markdown(f"*{truncate_text(result['match_reasoning'], 200)}*")
+
+        # Detailed analysis
+        if show_details:
+            with st.expander("View Analysis", expanded=False):
+                # Applicability section (if available)
+                if applicability:
+                    st.markdown("### Applicability Assessment")
+                    render_applicability_result(applicability, lesson, show_details=True)
+                    st.markdown("---")
+
+                # Technical links
+                if result.get("technical_links"):
+                    st.markdown("**Technical Links:**")
+                    for link in result["technical_links"]:
+                        st.markdown(f"- {link}")
+
+                # Safety considerations
+                if result.get("safety_considerations"):
+                    st.markdown("**Safety Considerations:**")
+                    st.warning(result["safety_considerations"])
+
+                # Recommended actions
+                if result.get("recommended_actions"):
+                    st.markdown("**Recommended Actions:**")
+                    for action in result["recommended_actions"]:
+                        st.markdown(f"- {action}")
+
+                st.markdown("---")
+
+                # Original lesson details
+                st.markdown("**Original Lesson:**")
+                render_lesson_card(lesson, show_enrichment=True, expanded=False)
+
+        st.divider()

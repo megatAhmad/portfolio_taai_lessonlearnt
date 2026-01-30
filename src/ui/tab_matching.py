@@ -6,7 +6,12 @@ import pandas as pd
 import logging
 
 from src.retrieval import create_hybrid_search, create_reranker, RetrievalResult
-from src.generation import create_relevance_analyzer, format_analysis_for_display
+from src.generation import (
+    create_relevance_analyzer,
+    format_analysis_for_display,
+    create_applicability_checker,
+    format_applicability_for_display,
+)
 
 from .utils import (
     dataframe_to_jobs_list,
@@ -17,6 +22,7 @@ from .utils import (
 from .components import (
     render_job_card,
     render_match_result,
+    render_match_result_with_applicability,
     render_error_message,
     render_success_message,
     render_info_message,
@@ -135,7 +141,7 @@ def render_matching_results(settings) -> None:
     # Matching controls
     st.subheader("Find Matching Lessons")
 
-    control_cols = st.columns(3)
+    control_cols = st.columns(4)
 
     with control_cols[0]:
         n_results = st.selectbox(
@@ -150,9 +156,16 @@ def render_matching_results(settings) -> None:
     with control_cols[2]:
         generate_analysis = st.checkbox("Generate AI analysis", value=True)
 
+    with control_cols[3]:
+        check_applicability = st.checkbox(
+            "Check applicability",
+            value=True,
+            help="AI checks if each lesson is applicable to this job (Yes/No/Cannot Determine)"
+        )
+
     # Run matching
     if st.button("Find Matches", type="primary"):
-        run_matching(job, n_results, use_reranker, generate_analysis, settings)
+        run_matching(job, n_results, use_reranker, generate_analysis, check_applicability, settings)
 
     # Display results
     if st.session_state.get("matching_results"):
@@ -166,6 +179,7 @@ def run_matching(
     n_results: int,
     use_reranker: bool,
     generate_analysis: bool,
+    check_applicability: bool,
     settings,
 ) -> None:
     """
@@ -176,6 +190,7 @@ def run_matching(
         n_results: Number of results to return
         use_reranker: Whether to use cross-encoder reranking
         generate_analysis: Whether to generate AI analysis
+        check_applicability: Whether to check applicability for each lesson
         settings: Application settings
     """
     from src.data_processing.preprocessor import combine_job_text
@@ -191,7 +206,7 @@ def run_matching(
         equipment_type = get_equipment_type_from_tag(equipment_tag)
 
         # Step 1: Hybrid search
-        progress.progress(0.2, text="Running hybrid search...")
+        progress.progress(0.15, text="Running hybrid search...")
 
         vector_store = st.session_state.vector_store
         bm25_index = st.session_state.bm25_index
@@ -208,7 +223,7 @@ def run_matching(
 
         # Step 2: Reranking
         if use_reranker and results:
-            progress.progress(0.4, text="Reranking results...")
+            progress.progress(0.3, text="Reranking results...")
 
             reranker = create_reranker()
             results = reranker.rerank_with_tier_preservation(
@@ -219,7 +234,7 @@ def run_matching(
             )
 
         # Step 3: Get full lesson data
-        progress.progress(0.6, text="Fetching lesson details...")
+        progress.progress(0.45, text="Fetching lesson details...")
 
         lessons_df = st.session_state.lessons_df
         lesson_lookup = {
@@ -229,7 +244,7 @@ def run_matching(
 
         # Step 4: Generate analysis
         if generate_analysis:
-            progress.progress(0.7, text="Generating AI analysis...")
+            progress.progress(0.55, text="Generating AI analysis...")
 
             analyzer = create_relevance_analyzer(settings)
             analyses = []
@@ -304,6 +319,44 @@ def run_matching(
 
             st.session_state.matching_results = simple_results
 
+        # Step 5: Applicability checking (if enabled)
+        if check_applicability and st.session_state.matching_results:
+            progress.progress(0.75, text="Checking applicability...")
+
+            applicability_checker = create_applicability_checker(settings)
+            applicability_results = {}
+
+            # Extract job steps if available
+            job_steps = job.get("job_steps", [])
+            if isinstance(job_steps, str):
+                job_steps = [s.strip() for s in job_steps.split("\n") if s.strip()]
+
+            for i, match_result in enumerate(st.session_state.matching_results):
+                lesson_id = match_result.get("lesson_id", "")
+                lesson = lesson_lookup.get(lesson_id, {})
+
+                # Clean NaN values
+                for key, value in lesson.items():
+                    if pd.isna(value):
+                        lesson[key] = None
+
+                # Run applicability check
+                applicability = applicability_checker.check_applicability(
+                    lesson=lesson,
+                    job=job,
+                    job_steps=job_steps,
+                )
+                formatted_applicability = format_applicability_for_display(applicability)
+                applicability_results[lesson_id] = formatted_applicability
+
+                # Update progress
+                progress.progress(0.75 + (0.2 * (i + 1) / len(st.session_state.matching_results)),
+                                  text=f"Checking applicability ({i+1}/{len(st.session_state.matching_results)})...")
+
+            st.session_state.applicability_results = applicability_results
+        else:
+            st.session_state.applicability_results = None
+
         progress.progress(1.0, text="Matching complete!")
         render_success_message(f"Found {len(st.session_state.matching_results)} matching lessons!")
 
@@ -321,6 +374,7 @@ def display_matching_results(job: Dict[str, Any], settings) -> None:
         settings: Application settings
     """
     results = st.session_state.matching_results
+    applicability_results = st.session_state.get("applicability_results", {})
 
     if not results:
         render_info_message("No matching lessons found.")
@@ -330,10 +384,11 @@ def display_matching_results(job: Dict[str, Any], settings) -> None:
     export_cols = st.columns([3, 1])
 
     with export_cols[1]:
-        excel_data = create_export_excel(results, job)
+        # Include applicability in export if available
+        export_data = create_export_excel_with_applicability(results, job, applicability_results)
         st.download_button(
             label="Export to Excel",
-            data=excel_data,
+            data=export_data,
             file_name=f"matches_{job.get('job_id', 'job')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
@@ -358,7 +413,37 @@ def display_matching_results(job: Dict[str, Any], settings) -> None:
             }.get(tier, tier)
             st.metric(tier_display, count)
 
+    # Applicability breakdown (if available)
+    if applicability_results:
+        st.divider()
+        st.markdown("**Applicability Summary**")
+
+        decision_counts = {"yes": 0, "no": 0, "cannot_be_determined": 0}
+        for app_result in applicability_results.values():
+            decision = app_result.get("decision", "cannot_be_determined")
+            decision_counts[decision] = decision_counts.get(decision, 0) + 1
+
+        app_cols = st.columns(3)
+        with app_cols[0]:
+            st.metric("✅ Applicable", decision_counts["yes"])
+        with app_cols[1]:
+            st.metric("❌ Not Applicable", decision_counts["no"])
+        with app_cols[2]:
+            st.metric("⚠️ Cannot Determine", decision_counts["cannot_be_determined"])
+
     st.divider()
+
+    # Filter controls for applicability
+    if applicability_results:
+        filter_col1, filter_col2 = st.columns([1, 3])
+        with filter_col1:
+            applicability_filter = st.selectbox(
+                "Filter by Applicability",
+                options=["All", "Applicable", "Not Applicable", "Cannot Determine"],
+                index=0,
+            )
+    else:
+        applicability_filter = "All"
 
     # Render each result
     lessons_df = st.session_state.lessons_df
@@ -376,7 +461,89 @@ def display_matching_results(job: Dict[str, Any], settings) -> None:
             if pd.isna(value):
                 lesson[key] = None
 
-        render_match_result(result, lesson, rank=i, show_details=True)
+        # Get applicability result if available
+        applicability = applicability_results.get(lesson_id) if applicability_results else None
+
+        # Apply filter
+        if applicability_filter != "All" and applicability:
+            decision = applicability.get("decision", "")
+            filter_map = {
+                "Applicable": "yes",
+                "Not Applicable": "no",
+                "Cannot Determine": "cannot_be_determined",
+            }
+            if decision != filter_map.get(applicability_filter, ""):
+                continue
+
+        # Render with or without applicability
+        if applicability:
+            render_match_result_with_applicability(
+                result, lesson, applicability, rank=i, show_details=True
+            )
+        else:
+            render_match_result(result, lesson, rank=i, show_details=True)
+
+
+def create_export_excel_with_applicability(
+    results: List[Dict[str, Any]],
+    job: Dict[str, Any],
+    applicability_results: Dict[str, Dict[str, Any]] = None,
+) -> bytes:
+    """
+    Create Excel export with applicability results.
+
+    Args:
+        results: List of matching results
+        job: Job dictionary
+        applicability_results: Dictionary of applicability results by lesson_id
+
+    Returns:
+        Excel file as bytes
+    """
+    import io
+
+    # Build export data
+    export_rows = []
+    for result in results:
+        lesson_id = result.get("lesson_id", "")
+
+        row = {
+            "Job ID": job.get("job_id", ""),
+            "Job Title": job.get("job_title", ""),
+            "Lesson ID": lesson_id,
+            "Lesson Title": result.get("title", ""),
+            "Relevance Score": result.get("relevance_score", 0),
+            "Match Tier": result.get("match_tier_display", result.get("match_tier", "")),
+            "Match Reasoning": result.get("match_reasoning", ""),
+            "Technical Links": "; ".join(result.get("technical_links", [])),
+            "Safety Considerations": result.get("safety_considerations", ""),
+            "Recommended Actions": "; ".join(result.get("recommended_actions", [])),
+            "Category": result.get("category", ""),
+            "Severity": result.get("severity", ""),
+            "Equipment": result.get("equipment_tag", ""),
+        }
+
+        # Add applicability columns if available
+        if applicability_results and lesson_id in applicability_results:
+            app = applicability_results[lesson_id]
+            row["Applicability Decision"] = app.get("decision_display", "")
+            row["Applicability Justification"] = app.get("justification", "")
+            row["Mitigation Already Applied"] = "Yes" if app.get("mitigation_already_applied") else "No"
+            row["Risk Not Present"] = "Yes" if app.get("risk_not_present") else "No"
+            row["Key Factors"] = "; ".join(app.get("key_factors", []))
+            row["Applicability Confidence"] = f"{app.get('confidence', 0):.0%}"
+
+        export_rows.append(row)
+
+    # Create DataFrame and export
+    df = pd.DataFrame(export_rows)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="Matching Results", index=False)
+    output.seek(0)
+
+    return output.getvalue()
 
 
 def render_batch_matching(settings) -> None:

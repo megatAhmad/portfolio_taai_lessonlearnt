@@ -421,6 +421,52 @@ def render_generation_docs():
     - Batch analysis support
     """)
 
+    st.divider()
+
+    st.markdown("### applicability_checker.py")
+    st.markdown("""
+    **AI-Powered Applicability Assessment:**
+
+    Determines whether each lesson learned is truly applicable to a specific job,
+    going beyond similarity matching to assess actual relevance.
+    """)
+
+    st.markdown("""
+    **Decision Types:**
+    - **YES** - The lesson is directly applicable to the job
+    - **NO** - The lesson is NOT applicable to this job
+    - **CANNOT BE DETERMINED** - Insufficient information to decide
+    """)
+
+    st.info("""
+    **Key Criteria for "NO" Decisions:**
+    1. Mitigation already applied in job steps
+    2. Risk does not exist in job context
+    3. Equipment incompatibility
+    4. Procedural mismatch
+    """)
+
+    with st.expander("View Applicability Output Schema"):
+        st.code("""
+{
+    "decision": "yes" | "no" | "cannot_be_determined",
+    "justification": "Detailed explanation (2-4 sentences)",
+    "mitigation_already_applied": true/false,
+    "risk_not_present": true/false,
+    "key_factors": ["factor1", "factor2", ...],
+    "confidence": 0.0-1.0
+}
+        """, language="json")
+
+    st.markdown("""
+    **Key Features:**
+    - Analyzes job steps against lesson corrective actions
+    - Detects when mitigations are already in place
+    - Identifies when risks don't apply to job context
+    - Provides detailed justification for each decision
+    - Confidence scoring for transparency
+    """)
+
 
 def render_ui_docs():
     """Render UI module documentation."""
@@ -801,6 +847,36 @@ print(analysis.technical_links)   # List[str]
 print(analysis.safety_considerations)
 print(analysis.recommended_actions)
 print(analysis.match_reasoning)
+    """, language="python")
+
+    st.markdown("### create_applicability_checker()")
+    st.code("""
+from src.generation import create_applicability_checker
+
+checker = create_applicability_checker(settings)
+
+# Check applicability with optional job steps
+result = checker.check_applicability(
+    lesson=lesson_dict,
+    job=job_dict,
+    job_steps=["Step 1: Isolate pump", "Step 2: Drain system", ...]
+)
+
+# Access results
+print(result.decision)               # "yes", "no", "cannot_be_determined"
+print(result.decision_display)       # "Applicable", "Not Applicable", ...
+print(result.justification)          # Detailed explanation
+print(result.mitigation_already_applied)  # True if already mitigated
+print(result.risk_not_present)       # True if risk doesn't apply
+print(result.key_factors)            # List of decision factors
+print(result.confidence)             # 0.0-1.0
+
+# Batch checking
+results = checker.check_batch(
+    lessons=[lesson1, lesson2, lesson3],
+    job=job_dict,
+    job_steps=job_steps_list
+)
     """, language="python")
 
 
