@@ -18,7 +18,8 @@ This is a **Proof of Concept (PoC) RAG (Retrieval-Augmented Generation) System**
 2. **Auto-generate metadata enrichment using LLM** (equipment type, applicability, procedures)
 3. Use **multi-tier hybrid retrieval** (equipment-specific → type → generic → semantic)
 4. Generate AI-powered relevance analysis explaining why lessons apply
-5. Present results in an intuitive 3-tab UI with filtering and export capabilities
+5. **AI applicability checking** - Determine if lessons truly apply (Yes/No/Cannot Determine)
+6. Present results in an intuitive 3-tab UI with filtering and export capabilities
 
 ## Quick Start Commands
 
@@ -44,8 +45,9 @@ DEBUG=true streamlit run app.py
 | Web Framework | Streamlit | ≥1.30.0 |
 | RAG Framework | LangChain | Latest stable |
 | Vector Database | ChromaDB | Latest (with persistence) |
-| Embeddings | Azure OpenAI text-embedding-3-small | 1536 dimensions |
-| LLM | Azure OpenAI GPT-4o-mini | Temperature: 0.3 (analysis), 0.1 (enrichment) |
+| Embeddings | text-embedding-3-small | 1536 dimensions |
+| LLM | GPT-4o-mini | Temperature: 0.3 (analysis), 0.1 (enrichment), 0.2 (applicability) |
+| LLM Providers | Azure OpenAI / OpenRouter | Choose one via `LLM_PROVIDER` env var |
 | Sparse Search | rank_bm25 | Latest |
 | Reranker | sentence-transformers cross-encoder | ms-marco-MiniLM-L-6-v2 |
 | Data Processing | pandas + openpyxl + pandera | Latest stable |
@@ -68,7 +70,8 @@ maintenance_rag_poc/
 ├── config/
 │   ├── __init__.py
 │   ├── settings.py               # Configuration management (env vars, params)
-│   └── prompts.py                # LLM prompt templates (relevance + enrichment)
+│   ├── prompts.py                # LLM prompt templates (relevance, enrichment, applicability)
+│   └── llm_client.py             # LLM client factory (Azure OpenAI / OpenRouter)
 ├── data/
 │   ├── sample_lessons.xlsx       # Sample lessons learned (basic columns only)
 │   ├── sample_lessons_enriched.xlsx  # Sample with enrichment (for demo)
@@ -100,6 +103,9 @@ maintenance_rag_poc/
 │       ├── tab_matching.py       # NEW: Tab 3 - Job Matching
 │       └── utils.py              # UI helper functions
 ├── chroma_db/                    # ChromaDB persistence (GITIGNORED)
+├── docs/
+│   ├── architecture_diagram.html # Interactive architecture diagram (browser)
+│   └── architecture_diagram.svg  # Vector architecture diagram
 └── tests/
     ├── __init__.py
     └── test_*.py                 # Unit tests
@@ -111,15 +117,18 @@ maintenance_rag_poc/
 |------|---------|
 | `maintenance_rag_project_requirements.md` | **Complete project specification** - Read this first for full context |
 | `app.py` | Main entry point, 3-tab layout, session state management |
-| `config/settings.py` | All configuration - no hardcoded values elsewhere |
-| `config/prompts.py` | LLM prompts for relevance analysis AND enrichment |
-| `src/data_processing/enrichment.py` | **NEW**: LLM metadata enrichment pipeline |
+| `docs_app.py` | Interactive documentation UI (`streamlit run docs_app.py`) |
+| `config/settings.py` | All configuration - supports Azure OpenAI and OpenRouter |
+| `config/prompts.py` | LLM prompts for relevance, enrichment, and applicability |
+| `config/llm_client.py` | **NEW**: LLM client factory (multi-provider support) |
+| `src/data_processing/enrichment.py` | LLM metadata enrichment pipeline |
 | `src/retrieval/hybrid_search.py` | **Multi-tier** RRF fusion with score boosting |
-| `src/generation/relevance_analyzer.py` | GPT-4o-mini with match type context |
+| `src/generation/relevance_analyzer.py` | GPT-4o-mini relevance analysis with match type context |
 | `src/generation/applicability_checker.py` | **NEW**: AI applicability assessment (Yes/No/Cannot Determine) |
-| `src/ui/tab_upload.py` | **NEW**: Upload & enrichment trigger UI |
-| `src/ui/tab_review.py` | **NEW**: Enrichment review dashboard UI |
-| `src/ui/tab_matching.py` | **NEW**: Job matching & results UI |
+| `src/ui/tab_upload.py` | Tab 1 - Upload & enrichment trigger UI |
+| `src/ui/tab_review.py` | Tab 2 - Enrichment review dashboard UI |
+| `src/ui/tab_matching.py` | Tab 3 - Job matching, applicability checking & results UI |
+| `docs/architecture_diagram.html` | **NEW**: Interactive architecture flow diagram |
 
 ## Architecture Overview
 
@@ -383,14 +392,28 @@ def calculate_boosted_score(base_score, lesson, job):
 
 ## Environment Configuration
 
-Create `.env` file (never commit this):
+Create `.env` file (never commit this). Choose ONE provider:
+
+### Option A: Azure OpenAI
 ```env
+LLM_PROVIDER=azure
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_API_KEY=your-api-key-here
 AZURE_OPENAI_API_VERSION=2024-05-01-preview
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-small
 AZURE_OPENAI_CHAT_DEPLOYMENT=gpt-4o-mini
 AZURE_OPENAI_ENRICHMENT_DEPLOYMENT=gpt-4o-mini
+DEBUG=false
+```
+
+### Option B: OpenRouter
+```env
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=your-openrouter-api-key
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_EMBEDDING_MODEL=openai/text-embedding-3-small
+OPENROUTER_CHAT_MODEL=openai/gpt-4o-mini
+OPENROUTER_ENRICHMENT_MODEL=openai/gpt-4o-mini
 DEBUG=false
 ```
 
@@ -497,10 +520,12 @@ DEBUG=false
 
 ### Common Issues
 1. **Azure OpenAI connection errors**: Check `.env` configuration and API version
-2. **ChromaDB persistence issues**: Ensure `chroma_db/` directory exists and is writable
-3. **Enrichment timeout**: Reduce batch size, implement pause/resume
-4. **Low enrichment accuracy**: Iterate on prompt, check sample outputs
-5. **Generic lessons not surfacing**: Verify Tier 3 filtering and boost values
+2. **OpenRouter connection errors**: Verify `OPENROUTER_API_KEY` and check model availability at https://openrouter.ai/models
+3. **ChromaDB persistence issues**: Ensure `chroma_db/` directory exists and is writable
+4. **Enrichment timeout**: Reduce batch size, implement pause/resume
+5. **Low enrichment accuracy**: Iterate on prompt, check sample outputs
+6. **Generic lessons not surfacing**: Verify Tier 3 filtering and boost values
+7. **Applicability check errors**: Ensure job descriptions have sufficient detail
 
 ### Debug Mode
 Set `DEBUG=true` in `.env` to enable verbose logging including:
@@ -525,6 +550,10 @@ Set `DEBUG=true` in `.env` to enable verbose logging including:
 | **Score Boosting** | Multiplicative adjustment based on match type/safety |
 | **Match Type** | Why lesson matched: equipment_specific, type, generic, semantic |
 | **Confidence Score** | LLM's self-assessed enrichment accuracy (0.0-1.0) |
+| **Applicability Check** | AI assessment if a lesson truly applies to a job (Yes/No/Cannot Determine) |
+| **Mitigation Applied** | The lesson's corrective action is already present in job steps |
+| **Risk Not Present** | The failure scenario from the lesson cannot occur in job context |
+| **LLM Provider** | Backend API service (Azure OpenAI or OpenRouter) |
 
 ## References
 
@@ -536,11 +565,19 @@ Set `DEBUG=true` in `.env` to enable verbose logging including:
 
 ---
 
-**Version**: 2.0
+**Version**: 2.1
 **Last Updated**: January 2026
 **Project Author**: Megat (Oil & Gas Maintenance AI Systems)
 
-**Major Changes from v1.0**:
+**Major Changes in v2.1**:
+- Added **AI applicability checking** feature (Yes/No/Cannot Determine decisions)
+- Added **OpenRouter** as alternative LLM provider to Azure OpenAI
+- Added LLM client factory for multi-provider support
+- Added interactive architecture flow diagram (`docs/architecture_diagram.html`)
+- Enhanced Tab 3 with applicability filtering and Excel export with justifications
+- Updated documentation with dual-provider configuration
+
+**Changes from v1.0 to v2.0**:
 - Added LLM-powered metadata enrichment pipeline
 - Introduced 3-tab Streamlit UI (Upload → Review → Match)
 - Implemented multi-tier hybrid retrieval with score boosting
