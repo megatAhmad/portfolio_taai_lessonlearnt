@@ -27,8 +27,11 @@ def render_home():
 
     This application helps maintenance teams in the Oil & Gas industry:
     - **Analyze** historical lessons learned from turnaround maintenance
-    - **Match** relevant lessons to future maintenance jobs
-    - **Generate** AI-powered insights and safety recommendations
+    - **Match** relevant lessons to future maintenance jobs using multi-tier retrieval
+    - **Generate** AI-powered relevance analysis and safety recommendations
+    - **Assess applicability** - AI determines if lessons truly apply (Yes/No/Cannot Determine)
+
+    **Supports:** Azure OpenAI and OpenRouter as LLM providers
 
     ---
 
@@ -110,10 +113,17 @@ def render_architecture():
     └─────────────────────┬───────────────────────────────────────┘
                           │
     ┌─────────────────────▼───────────────────────────────────────┐
-    │      AZURE OPENAI GENERATION LAYER                          │
-    │  GPT-4o-mini: Relevance Analysis + Match Reasoning          │
+    │      LLM GENERATION LAYER (Azure OpenAI / OpenRouter)       │
+    │  ┌───────────────────────┐  ┌───────────────────────────┐   │
+    │  │ Relevance Analysis    │  │ Applicability Check       │   │
+    │  │ • Score 0-100         │  │ • Yes/No/Cannot Determine │   │
+    │  │ • Technical links     │  │ • Justification           │   │
+    │  │ • Safety notes        │  │ • Mitigation flags        │   │
+    │  └───────────────────────┘  └───────────────────────────┘   │
     └─────────────────────────────────────────────────────────────┘
     """, language=None)
+
+    st.info("📊 **Interactive Diagram**: Open `docs/architecture_diagram.html` in your browser for a detailed visual flow diagram.")
 
     st.divider()
 
@@ -184,7 +194,8 @@ def render_code_structure():
     ├── config/                   # Configuration
     │   ├── __init__.py
     │   ├── settings.py           # All application settings
-    │   └── prompts.py            # LLM prompt templates
+    │   ├── prompts.py            # LLM prompt templates
+    │   └── llm_client.py         # LLM client factory (Azure/OpenRouter)
     │
     ├── src/
     │   ├── data_processing/      # Data handling
@@ -194,14 +205,15 @@ def render_code_structure():
     │   │   └── enrichment.py     # LLM metadata enrichment
     │   │
     │   ├── retrieval/            # Search components
-    │   │   ├── embeddings.py     # Azure OpenAI embeddings
+    │   │   ├── embeddings.py     # Embeddings (Azure/OpenRouter)
     │   │   ├── vector_store.py   # ChromaDB operations
     │   │   ├── bm25_search.py    # BM25 sparse retrieval
     │   │   ├── hybrid_search.py  # Multi-tier hybrid search
     │   │   └── reranker.py       # Cross-encoder reranking
     │   │
     │   ├── generation/           # AI generation
-    │   │   └── relevance_analyzer.py  # GPT-4o-mini analysis
+    │   │   ├── relevance_analyzer.py    # Relevance analysis
+    │   │   └── applicability_checker.py # Applicability assessment
     │   │
     │   └── ui/                   # Streamlit UI
     │       ├── components.py     # Reusable UI components
@@ -212,6 +224,10 @@ def render_code_structure():
     │
     ├── data/                     # Sample data
     │   └── create_sample_data.py # Sample data generator
+    │
+    ├── docs/                     # Documentation
+    │   ├── architecture_diagram.html  # Interactive diagram
+    │   └── architecture_diagram.svg   # Vector diagram
     │
     └── chroma_db/                # Vector store persistence
     """, language=None)
@@ -308,8 +324,9 @@ def render_retrieval_docs():
 
     st.markdown("### embeddings.py")
     st.markdown("""
-    Azure OpenAI embedding management:
+    Embedding management (supports Azure OpenAI and OpenRouter):
     - Uses text-embedding-3-small (1536 dimensions)
+    - Automatic provider selection based on `LLM_PROVIDER` env var
     - Disk and memory caching for cost optimization
     - Batch processing support
     - Token counting with tiktoken
@@ -946,7 +963,7 @@ def main():
     st.divider()
     st.caption(
         "Maintenance Lessons Learned RAG System Documentation | "
-        "Version 1.0 | "
+        "Version 2.1 | "
         "© 2026 Megat"
     )
 
