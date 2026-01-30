@@ -1,0 +1,36 @@
+# Core Framework
+streamlit>=1.30.0
+python-dotenv>=1.0.0
+
+# Azure OpenAI
+openai>=1.10.0
+tiktoken>=0.5.2
+
+# RAG & LangChain
+langchain>=0.2.0
+langchain-core>=0.2.0
+langchain-text-splitters>=0.2.0
+langchain-openai>=0.1.0
+langchain-community>=0.2.0
+chromadb>=0.4.22
+
+# Retrieval
+rank-bm25>=0.2.2
+sentence-transformers>=2.3.0
+
+# Data Processing
+pandas>=2.1.0
+openpyxl>=3.1.0
+xlrd>=2.0.1
+pandera>=0.17.0
+
+# Utilities
+tenacity>=8.2.3
+numpy>=1.24.0
+
+# JSON Processing (for enrichment)
+pydantic>=2.5.0
+
+# Evaluation (Optional)
+# ragas>=0.1.0
+# deepeval>=0.20.0
